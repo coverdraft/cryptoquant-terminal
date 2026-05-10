@@ -10,14 +10,19 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const { runBrainCycle } = await import('@/lib/services/brain-pipeline');
-    const body = await request.json();
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch {
+      // No JSON body provided, use defaults
+    }
     const config: Partial<import('@/lib/services/brain-pipeline').PipelineConfig> = {
-      capitalUsd: body.capitalUsd,
-      chain: body.chain || 'solana',
-      scanLimit: body.scanLimit || 50,
-      minOperabilityScore: body.minOperabilityScore || 40,
-      cycleIntervalMs: body.cycleIntervalMs || 60000,
-      maxAllocationPctPerToken: body.maxAllocationPctPerToken || 10,
+      ...(body.capitalUsd !== undefined && { capitalUsd: body.capitalUsd }),
+      ...(body.chain !== undefined && { chain: body.chain }),
+      ...(body.scanLimit !== undefined && { scanLimit: body.scanLimit }),
+      ...(body.minOperabilityScore !== undefined && { minOperabilityScore: body.minOperabilityScore }),
+      ...(body.cycleIntervalMs !== undefined && { cycleIntervalMs: body.cycleIntervalMs }),
+      ...(body.maxAllocationPctPerToken !== undefined && { maxAllocationPctPerToken: body.maxAllocationPctPerToken }),
     };
 
     const result = await runBrainCycle(config);
@@ -28,8 +33,9 @@ export async function POST(request: NextRequest) {
     }, { status: result.status === 'COMPLETED' ? 200 : 500 });
   } catch (error) {
     console.error('[/api/brain/pipeline] Error:', error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { data: null, error: 'Pipeline execution failed' },
+      { data: null, error: `Pipeline execution failed: ${errorMsg}` },
       { status: 500 },
     );
   }

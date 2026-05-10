@@ -55,7 +55,7 @@ const DEFAULT_CONFIG: PipelineConfig = {
 async function scanTokens(config: PipelineConfig): Promise<TokenProfile[]> {
   // Handle case-insensitive chain matching (DB stores SOL, ETH, SOLANA etc.)
   const chainVariants = [config.chain, config.chain.toUpperCase(), config.chain.toLowerCase()];
-  const normalizedChain = config.chain.toUpperCase() === 'SOL' ? ['SOL', 'SOLANA', 'sol', 'solana'] : chainVariants;
+  const chainUpper = config.chain.toUpperCase(); const normalizedChain = (chainUpper === 'SOL' || chainUpper === 'SOLANA') ? ['SOL', 'SOLANA', 'sol', 'solana'] : [config.chain, chainUpper, config.chain.toLowerCase()];
 
   const tokens = await db.token.findMany({
     where: {
