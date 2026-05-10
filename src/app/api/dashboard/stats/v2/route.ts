@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 /**
  * GET /api/dashboard/stats/v2
  * Lightweight dashboard stats - only DB queries, no heavy service imports.
+ * Includes all signal types: SMART_MONEY (not just SMART_MONEY_ENTRY), RUG_PULL, V_SHAPE, LIQUIDITY_TRAP, PATTERN
  */
 export async function GET() {
   try {
@@ -14,21 +15,24 @@ export async function GET() {
       totalTokens, activeSignals, smartMoneyWallets, totalPatterns,
       recentEvents, predictiveSignals, dangerTokens, safeTokens,
       rugPullSignals, smartMoneySignals, vShapeSignals, liquidityTrapSignals,
+      patternSignals, tokensWithLiquidity,
     ] = await Promise.all([
-      db.token.count(),
-      db.signal.count({ where: { createdAt: { gte: oneHourAgo } } }),
-      db.trader.count({ where: { isSmartMoney: true } }),
-      db.patternRule.count({ where: { isActive: true } }),
-      db.userEvent.count({ where: { createdAt: { gte: oneDayAgo } } }),
+      db.token.count().catch(() => 0),
+      db.signal.count({ where: { createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.trader.count({ where: { isSmartMoney: true } }).catch(() => 0),
+      db.patternRule.count({ where: { isActive: true } }).catch(() => 0),
+      db.userEvent.count({ where: { createdAt: { gte: oneDayAgo } } }).catch(() => 0),
       db.predictiveSignal.count({
         where: { OR: [{ validUntil: null }, { validUntil: { gte: new Date() } }] },
-      }),
-      db.tokenDNA.count({ where: { riskScore: { gt: 60 } } }),
-      db.tokenDNA.count({ where: { riskScore: { lte: 30 } } }),
-      db.signal.count({ where: { type: 'RUG_PULL', createdAt: { gte: oneHourAgo } } }),
-      db.signal.count({ where: { type: 'SMART_MONEY_ENTRY', createdAt: { gte: oneHourAgo } } }),
-      db.signal.count({ where: { type: 'V_SHAPE', createdAt: { gte: oneHourAgo } } }),
-      db.signal.count({ where: { type: 'LIQUIDITY_TRAP', createdAt: { gte: oneHourAgo } } }),
+      }).catch(() => 0),
+      db.tokenDNA.count({ where: { riskScore: { gt: 60 } } }).catch(() => 0),
+      db.tokenDNA.count({ where: { riskScore: { lte: 30 } } }).catch(() => 0),
+      db.signal.count({ where: { type: 'RUG_PULL', createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.signal.count({ where: { type: { in: ['SMART_MONEY', 'SMART_MONEY_ENTRY'] }, createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.signal.count({ where: { type: 'V_SHAPE', createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.signal.count({ where: { type: 'LIQUIDITY_TRAP', createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.signal.count({ where: { type: 'PATTERN', createdAt: { gte: oneHourAgo } } }).catch(() => 0),
+      db.token.count({ where: { liquidity: { gt: 0 } } }).catch(() => 0),
     ]);
 
     const eventScore = Math.min(30, Math.floor((recentEvents / Math.max(totalTokens, 1)) * 100));
@@ -42,7 +46,8 @@ export async function GET() {
     return NextResponse.json({
       totalTokens, activeSignals, smartMoneyWallets, totalPatterns, recentEvents,
       dangerTokens, safeTokens, rugPullSignals, smartMoneySignals, vShapeSignals,
-      liquidityTrapSignals, predictiveSignals, fomoIndex,
+      liquidityTrapSignals, patternSignals, predictiveSignals, tokensWithLiquidity,
+      fomoIndex,
       threatLevel: rugPullSignals > 5 ? 'HIGH' : rugPullSignals > 2 ? 'MEDIUM' : 'LOW',
     });
   } catch (error) {
