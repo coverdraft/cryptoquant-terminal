@@ -18,7 +18,7 @@
 
 import { db } from '@/lib/db';
 import { calculateOperability, batchCalculateOperability, persistOperabilityScores, type OperabilityInput, type OperabilityResult } from './operability-filter';
-import { matchSystem, batchMatchSystems, type TokenProfile, type SystemMatch } from './project-system-matcher';
+import { batchMatchSystems, type TokenProfile, type SystemMatch } from './project-system-matcher';
 import { dexScreenerClient, type TokenLiquidityData } from './dexscreener-client';
 import { coinGeckoClient } from './coingecko-client';
 import { generateAllSignals, saveSignalsToDb, type GeneratedSignal, type TokenMarketData } from './signal-generators';
@@ -210,6 +210,7 @@ async function enrichWithLiquidity(
               volume24h: liqData.volume24h,
               marketCap: liqData.marketCap,
               priceChange1h: liqData.priceChange1h,
+              priceChange6h: liqData.priceChange6h,
               priceChange24h: liqData.priceChange24h,
             },
           });
@@ -297,7 +298,7 @@ async function generateSignals(
   tokens: TokenProfile[],
   liquidityMap: Map<string, TokenLiquidityData>
 ): Promise<{ signals: GeneratedSignal[]; breakdown: PipelineResult['signalBreakdown']; }> {
-  const tokensWithMarketData: { tokenId: string; tokenDbId: string; marketData: TokenMarketData; }[] = [];
+  const tokensWithMarketData: { tokenId: string; tokenDbId: string; tokenAddress: string; marketData: TokenMarketData; }[] = [];
 
   for (const token of tokens) {
     // Find the token's DB ID
@@ -342,7 +343,7 @@ async function generateSignals(
       dexId: '',
     };
 
-    tokensWithMarketData.push({ tokenId: dbToken.id, tokenDbId: dbToken.id, marketData });
+    tokensWithMarketData.push({ tokenId: dbToken.id, tokenDbId: dbToken.id, tokenAddress: token.tokenAddress, marketData });
   }
 
   const signals = await generateAllSignals(tokensWithMarketData);
@@ -353,9 +354,9 @@ async function generateSignals(
   try {
     const { candlestickPatternEngine } = await import('./candlestick-pattern-engine');
     const topForPatterns = tokensWithMarketData.slice(0, 5);
-    for (const { tokenId, marketData } of topForPatterns) {
+    for (const { tokenId, tokenAddress, marketData } of topForPatterns) {
       try {
-        const result = await candlestickPatternEngine.scanToken(marketData.symbol);
+        const result = await candlestickPatternEngine.scanToken(tokenAddress);
         if (result.patterns.length > 0) {
           // Save pattern signals
           for (const pattern of result.patterns.slice(0, 3)) {
@@ -388,8 +389,8 @@ async function generateSignals(
   // Generate predictive signals
   let predictiveCount = 0;
   try {
-    for (const { tokenId, marketData } of tokensWithMarketData.slice(0, 10)) {
-      const predSignal = generatePredictiveSignal(marketData);
+    for (const { tokenId, tokenAddress, marketData } of tokensWithMarketData.slice(0, 10)) {
+      const predSignal = generatePredictiveSignal(marketData, tokenAddress);
       if (predSignal) {
         try {
           await db.predictiveSignal.create({
@@ -421,7 +422,7 @@ async function generateSignals(
 // STEP 5: PREDICTIVE SIGNALS
 // ============================================================
 
-function generatePredictiveSignal(data: TokenMarketData): any | null {
+function generatePredictiveSignal(data: TokenMarketData, tokenAddress: string): any | null {
   // Determine signal type based on market conditions
   let signalType = '';
   let confidence = 0;
@@ -463,7 +464,7 @@ function generatePredictiveSignal(data: TokenMarketData): any | null {
   return {
     signalType,
     chain: data.chain,
-    tokenAddress: data.symbol,
+    tokenAddress,
     prediction: JSON.stringify(prediction),
     confidence,
     timeframe: '1h',
@@ -782,6 +783,7 @@ async function updateGrowthTracking(
   const capitalAfterUsd = capitalBeforeUsd + netGainUsd;
 
   try {
+    const lastState = await db.capitalState.findFirst({ orderBy: { updatedAt: 'desc' } });
     await db.capitalState.create({
       data: {
         totalCapitalUsd: capitalAfterUsd,
@@ -790,6 +792,7 @@ async function updateGrowthTracking(
         feesPaidTotalUsd: feesPaidUsd,
         realizedPnlUsd: netGainUsd,
         compoundGrowthPct: capitalBeforeUsd > 0 ? ((capitalAfterUsd - capitalBeforeUsd) / capitalBeforeUsd) * 100 : 0,
+        cycleCount: (lastState?.cycleCount ?? 0) + 1,
       },
     });
   } catch { /* skip */ }

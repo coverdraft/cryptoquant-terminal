@@ -24,6 +24,7 @@ model Token {
   priceChange5m   Float    @default(0)
   priceChange15m  Float    @default(0)
   priceChange1h   Float    @default(0)
+  priceChange6h   Float    @default(0)
   priceChange24h  Float    @default(0)
   
   // DEX Metadata

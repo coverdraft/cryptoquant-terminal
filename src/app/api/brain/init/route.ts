@@ -97,6 +97,7 @@ async function backgroundInit() {
               volume24h: liqData.volume24h,
               marketCap: liqData.marketCap,
               priceChange1h: liqData.priceChange1h,
+              priceChange6h: liqData.priceChange6h,
               priceChange24h: liqData.priceChange24h,
             },
           });
@@ -256,6 +257,7 @@ async function backgroundInit() {
                   volume24h: liqData.volume24h,
                   marketCap: liqData.marketCap,
                   priceChange1h: liqData.priceChange1h,
+                  priceChange6h: liqData.priceChange6h,
                   priceChange24h: liqData.priceChange24h,
                 },
               });
