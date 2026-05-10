@@ -61,7 +61,7 @@ export interface PipelineResult {
 const DEFAULT_CONFIG: PipelineConfig = {
   capitalUsd: 100,
   chain: 'solana',
-  scanLimit: 50,
+  scanLimit: 250,
   minOperabilityScore: 40,
   cycleIntervalMs: 300000,
   maxAllocationPctPerToken: 10,
@@ -96,7 +96,7 @@ async function discoverTokens(config: PipelineConfig): Promise<TokenProfile[]> {
   if (tokens.length < 20) {
     console.log(`[Pipeline:Step1] Only ${tokens.length} tokens in DB, fetching from CoinGecko...`);
     try {
-      const cgTokens = await coinGeckoClient.getTopTokens(100);
+      const cgTokens = await coinGeckoClient.getTopTokens(250);
       let upserted = 0;
 
       for (const token of cgTokens) {
@@ -178,7 +178,7 @@ async function enrichWithLiquidity(
   // Take top tokens by volume for DexScreener enrichment (to avoid rate limits)
   const topTokens = tokens
     .sort((a, b) => b.volume24h - a.volume24h)
-    .slice(0, 30);
+    .slice(0, 100);
 
   let enrichmentCount = 0;
 
@@ -232,7 +232,7 @@ async function enrichWithLiquidity(
 
 async function fetchOHLCVCandles(tokens: TokenProfile[]): Promise<number> {
   let totalCandles = 0;
-  const topForCandles = tokens.slice(0, 10); // Only top 10 to respect rate limits
+  const topForCandles = tokens.slice(0, 30); // Only top 10 to respect rate limits
 
   for (const token of topForCandles) {
     try {
@@ -354,7 +354,7 @@ async function generateSignals(
   let patternCount = 0;
   try {
     const { candlestickPatternEngine } = await import('./candlestick-pattern-engine');
-    const topForPatterns = tokensWithMarketData.slice(0, 5);
+    const topForPatterns = tokensWithMarketData.slice(0, 20);
     for (const { tokenId, tokenAddress, marketData } of topForPatterns) {
       try {
         const result = await candlestickPatternEngine.scanToken(tokenAddress);
@@ -390,7 +390,7 @@ async function generateSignals(
   // Generate predictive signals
   let predictiveCount = 0;
   try {
-    for (const { tokenId, tokenAddress, marketData } of tokensWithMarketData.slice(0, 10)) {
+    for (const { tokenId, tokenAddress, marketData } of tokensWithMarketData.slice(0, 30)) {
       const predSignal = generatePredictiveSignal(marketData, tokenAddress);
       if (predSignal) {
         try {

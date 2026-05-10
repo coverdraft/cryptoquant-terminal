@@ -376,6 +376,116 @@ export class CoinGeckoClient {
     );
   }
 
+
+  /**
+   * Get top tokens with PAGINATION - fetches multiple pages.
+   * Each page returns up to 250 tokens. Use pages 1-N for full coverage.
+   * Respects rate limits with 2s delay between pages.
+   */
+  async getTopTokensPaginated(totalLimit: number = 1250): Promise<CoinGeckoMappedToken[]> {
+    const allTokens: CoinGeckoMappedToken[] = [];
+    const perPage = 250;
+    const maxPages = Math.ceil(totalLimit / perPage);
+
+    for (let page = 1; page <= maxPages; page++) {
+      const key = cacheKey(SOURCE, 'markets', `top:p${page}:${perPage}`);
+
+      try {
+        const pageTokens = await unifiedCache.getOrFetch(
+          key,
+          async () => {
+            const params = new URLSearchParams({
+              vs_currency: 'usd',
+              order: 'market_cap_desc',
+              per_page: String(perPage),
+              page: String(page),
+              sparkline: 'false',
+              price_change_percentage: '1h,24h,7d',
+            });
+
+            const data = await this.fetchApi<CoinGeckoMarketCoin[]>(
+              `/coins/markets?${params}`
+            );
+
+            if (!Array.isArray(data)) return [];
+            return data.map(coin => this.mapMarketCoinToToken(coin));
+          },
+          SOURCE,
+          CACHE_TTLS.markets,
+        );
+
+        if (pageTokens.length === 0) break; // No more results
+        allTokens.push(...pageTokens);
+
+        if (allTokens.length >= totalLimit) break;
+        if (pageTokens.length < perPage) break; // Last page
+
+        // Rate limit: wait between pages
+        if (page < maxPages) {
+          await this.delay(2000);
+        }
+      } catch (err) {
+        console.warn(`[CoinGecko] Pagination page ${page} failed:`, err);
+        break; // Stop on error
+      }
+    }
+
+    return allTokens.slice(0, totalLimit);
+  }
+
+  /**
+   * Get top tokens by volume with PAGINATION.
+   * Discovers high-activity tokens that may not be top by market cap.
+   */
+  async getTopTokensByVolumePaginated(totalLimit: number = 500): Promise<CoinGeckoMappedToken[]> {
+    const allTokens: CoinGeckoMappedToken[] = [];
+    const perPage = 250;
+    const maxPages = Math.ceil(totalLimit / perPage);
+
+    for (let page = 1; page <= maxPages; page++) {
+      const key = cacheKey(SOURCE, 'markets', `volume:p${page}:${perPage}`);
+
+      try {
+        const pageTokens = await unifiedCache.getOrFetch(
+          key,
+          async () => {
+            const params = new URLSearchParams({
+              vs_currency: 'usd',
+              order: 'volume_desc',
+              per_page: String(perPage),
+              page: String(page),
+              sparkline: 'false',
+              price_change_percentage: '1h,24h,7d',
+            });
+
+            const data = await this.fetchApi<CoinGeckoMarketCoin[]>(
+              `/coins/markets?${params}`
+            );
+
+            if (!Array.isArray(data)) return [];
+            return data.map(coin => this.mapMarketCoinToToken(coin));
+          },
+          SOURCE,
+          CACHE_TTLS.markets,
+        );
+
+        if (pageTokens.length === 0) break;
+        allTokens.push(...pageTokens);
+
+        if (allTokens.length >= totalLimit) break;
+        if (pageTokens.length < perPage) break;
+
+        if (page < maxPages) {
+          await this.delay(2000);
+        }
+      } catch (err) {
+        console.warn(`[CoinGecko] Volume pagination page ${page} failed:`, err);
+        break;
+      }
+    }
+
+    return allTokens.slice(0, totalLimit);
+  }
   // ----------------------------------------------------------
   // TOKEN DETAIL
   // ----------------------------------------------------------

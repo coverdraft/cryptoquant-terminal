@@ -136,7 +136,7 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   capitalUsd: 10,
   initialCapitalUsd: 10,
   chain: 'SOL',
-  scanLimit: 20,
+  scanLimit: 250,
 
   cycleIntervalMs: 5 * 60 * 1000,         // 5 min
   marketSyncIntervalMs: 2 * 60 * 1000,      // 2 min
@@ -493,7 +493,7 @@ class BrainScheduler {
       // Step 1: Fetch top tokens from CoinGecko (PRIMARY - free, no API key)
       let coinGeckoUpserted = 0;
       try {
-        const cgTokens = await coinGeckoClient.getTopTokens(50);
+        const cgTokens = await coinGeckoClient.getTopTokens(250);
 
         if (cgTokens.length > 0) {
           for (const token of cgTokens) {
