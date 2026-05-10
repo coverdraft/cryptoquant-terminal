@@ -22,6 +22,7 @@ import { batchMatchSystems, type TokenProfile, type SystemMatch } from './projec
 import { dexScreenerClient, type TokenLiquidityData } from './dexscreener-client';
 import { coinGeckoClient } from './coingecko-client';
 import { generateAllSignals, saveSignalsToDb, type GeneratedSignal, type TokenMarketData } from './signal-generators';
+import { generatePatternSignals } from './signal-generators';
 
 export interface PipelineConfig {
   capitalUsd: number;
@@ -542,6 +543,18 @@ export async function runBrainCycle(
       const signalResult = await generateSignals(tokens, liquidityMap);
       allSignals = signalResult.signals;
       signalBreakdown = signalResult.breakdown;
+
+    // STEP 4b: PATTERN SIGNALS
+    let patternSignalCount = 0;
+    if (fullConfig.enableSignals && tokens.length > 0) {
+      try {
+        const patternResult = await generatePatternSignals(tokens);
+        patternSignalCount = patternResult.count;
+        signalBreakdown.patterns = patternSignalCount;
+      } catch (e) {
+        console.error("[Pipeline] Pattern signal generation failed:", e);
+      }
+    }
     }
 
     // STEP 5: OPERABILITY FILTER

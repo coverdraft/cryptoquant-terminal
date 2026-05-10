@@ -296,3 +296,152 @@ export async function saveSignalsToDb(signals: GeneratedSignal[]): Promise<numbe
 }
 
 export type { TokenMarketData };
+
+// ============================================================
+// PATTERN SIGNAL GENERATOR
+// ============================================================
+
+export async function generatePatternSignals(
+  tokens: Array<{
+    id: string;
+    symbol: string;
+    chain: string;
+    address: string;
+    priceChange24h?: number;
+    priceChange1h?: number;
+    volume24h?: number;
+    liquidity?: number;
+    marketCap?: number;
+  }>,
+): Promise<{ signals: Array<any>; count: number }> {
+  const { db } = await import('@/lib/db');
+  
+  // Get active pattern rules
+  const patternRules = await db.patternRule.findMany({
+    where: { isActive: true },
+  });
+  
+  console.log(`[PatternSignals] Evaluating ${patternRules.length} rules against ${tokens.length} tokens`);
+  
+  const signals: Array<any> = [];
+  
+  for (const rule of patternRules) {
+    try {
+      const conditions = typeof rule.conditions === 'string' 
+        ? JSON.parse(rule.conditions) 
+        : rule.conditions;
+      
+      if (!conditions) continue;
+      
+      for (const token of tokens) {
+        try {
+          let matched = false;
+          let confidence = 0.5;
+          let description = rule.description || rule.name;
+          
+          // Evaluate conditions against token data
+          const priceChange24h = token.priceChange24h ?? 0;
+          const priceChange1h = token.priceChange1h ?? 0;
+          const volume24h = token.volume24h ?? 0;
+          const liquidity = token.liquidity ?? 0;
+          const marketCap = token.marketCap ?? 0;
+          
+          // Check various condition types
+          if (conditions.priceChange24hMin !== undefined && priceChange24h >= conditions.priceChange24hMin) {
+            matched = true;
+            confidence += 0.1;
+          }
+          if (conditions.priceChange24hMax !== undefined && priceChange24h <= conditions.priceChange24hMax) {
+            matched = true;
+            confidence += 0.1;
+          }
+          if (conditions.priceChange1hMin !== undefined && priceChange1h >= conditions.priceChange1hMin) {
+            matched = true;
+            confidence += 0.1;
+          }
+          if (conditions.volumeMin !== undefined && volume24h >= conditions.volumeMin) {
+            matched = true;
+            confidence += 0.05;
+          }
+          if (conditions.liquidityMin !== undefined && liquidity >= conditions.liquidityMin) {
+            matched = true;
+            confidence += 0.05;
+          }
+          if (conditions.marketCapMax !== undefined && marketCap > 0 && marketCap <= conditions.marketCapMax) {
+            matched = true;
+            confidence += 0.05;
+          }
+          
+          // If conditions have a "type" field, use it for matching logic
+          if (conditions.type === 'VOLATILITY_SPIKE' && Math.abs(priceChange24h) > 10) {
+            matched = true;
+            confidence += 0.15;
+            description = `${rule.name}: Volatility spike detected (${priceChange24h.toFixed(1)}% 24h)`;
+          }
+          if (conditions.type === 'VOLUME_SURGE' && volume24h > 100000) {
+            matched = true;
+            confidence += 0.15;
+            description = `${rule.name}: Volume surge detected ($${(volume24h/1000).toFixed(0)}K 24h)`;
+          }
+          if (conditions.type === 'MOMENTUM_UP' && priceChange24h > 5 && priceChange1h > 2) {
+            matched = true;
+            confidence += 0.15;
+            description = `${rule.name}: Bullish momentum (${priceChange24h.toFixed(1)}% 24h, ${priceChange1h.toFixed(1)}% 1h)`;
+          }
+          if (conditions.type === 'MOMENTUM_DOWN' && priceChange24h < -5 && priceChange1h < -2) {
+            matched = true;
+            confidence += 0.15;
+            description = `${rule.name}: Bearish momentum (${priceChange24h.toFixed(1)}% 24h, ${priceChange1h.toFixed(1)}% 1h)`;
+          }
+          if (conditions.type === 'LOW_LIQUIDITY_RISK' && liquidity > 0 && liquidity < 50000) {
+            matched = true;
+            confidence += 0.15;
+            description = `${rule.name}: Low liquidity risk ($${liquidity.toFixed(0)})`;
+          }
+          
+          // Generic match: if no specific conditions matched but rule has no conditions object
+          if (!matched && Object.keys(conditions).length === 0) {
+            // Skip rules with empty conditions
+            continue;
+          }
+          
+          if (!matched) continue;
+          
+          // Cap confidence at 0.95
+          confidence = Math.min(confidence, 0.95);
+          
+          // Determine direction
+          const direction = priceChange24h > 0 ? 'BULLISH' : priceChange24h < 0 ? 'BEARISH' : 'NEUTRAL';
+          
+          // Create the signal
+          const signal = await db.signal.create({
+            data: {
+              type: 'PATTERN',
+              tokenId: token.id,
+              confidence: Math.round(confidence * 100),
+              direction,
+              description: description.slice(0, 500),
+              metadata: JSON.stringify({
+                patternRuleId: rule.id,
+                patternRuleName: rule.name,
+                category: rule.category || 'GENERAL',
+                conditions,
+                tokenSymbol: token.symbol,
+                tokenChain: token.chain,
+              }),
+            },
+          });
+          
+          signals.push(signal);
+        } catch (tokenError) {
+          // Skip individual token errors
+        }
+      }
+    } catch (ruleError) {
+      console.error(`[PatternSignals] Error processing rule ${rule.id}:`, ruleError);
+    }
+  }
+  
+  console.log(`[PatternSignals] Created ${signals.length} pattern signals`);
+  return { signals, count: signals.length };
+}

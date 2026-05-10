@@ -327,6 +327,8 @@ model UserEvent {
 model PatternRule {
   id              String   @id @default(cuid())
   name            String
+  description     String   @default("")
+  category        String   @default("GENERAL")
   conditions      String   @default("{}")
   isActive        Boolean  @default(true)
   backtestResults String   @default("{}")
@@ -385,6 +387,7 @@ model PredictiveSignal {
   sector          String?  // MEME, DEFI, L1, L2, NFT, BRIDGE, STABLE
 
   prediction      String   @default("{}") // JSON: qué se predice
+  direction       String   @default("NEUTRAL")
   confidence      Float    @default(0)    // 0-1
   timeframe       String   @default("1h")
   validUntil      DateTime?
