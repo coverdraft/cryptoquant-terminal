@@ -299,6 +299,13 @@ export type { TokenMarketData };
 
 // ============================================================
 // PATTERN SIGNAL GENERATOR
+// Matches token data against PatternRule conditions from the DB.
+// Condition fields match the actual seeded rules:
+//   dropThreshold, recoveryThreshold, volumeMultiplier, minPriceChange,
+//   liquidityDropPct, maxPriceChange, h1Change, h24Change, minDrop,
+//   minVolume, min24hDrop, min1hBounce, minChange, min24hChange,
+//   min1hChange, max24hChange, max1hChange, maxLiquidity, volumeRatio,
+//   min1hAbs, min24hAbs, maxPriceChange
 // ============================================================
 
 export async function generatePatternSignals(
@@ -307,141 +314,137 @@ export async function generatePatternSignals(
     symbol: string;
     chain: string;
     address: string;
-    priceChange24h?: number;
-    priceChange1h?: number;
-    volume24h?: number;
-    liquidity?: number;
-    marketCap?: number;
+    priceChange24h?: number | null;
+    priceChange1h?: number | null;
+    volume24h?: number | null;
+    liquidity?: number | null;
+    marketCap?: number | null;
   }>,
 ): Promise<{ signals: Array<any>; count: number }> {
   const { db } = await import('@/lib/db');
-  
-  // Get active pattern rules
-  const patternRules = await db.patternRule.findMany({
-    where: { isActive: true },
-  });
-  
-  console.log(`[PatternSignals] Evaluating ${patternRules.length} rules against ${tokens.length} tokens`);
-  
+
+  const rules = await db.patternRule.findMany({ where: { isActive: true } });
+  console.log(`[PatternSignals] Evaluating ${rules.length} rules against ${tokens.length} tokens`);
+
   const signals: Array<any> = [];
-  
-  for (const rule of patternRules) {
+
+  for (const rule of rules) {
+    let c: Record<string, any> = {};
     try {
-      const conditions = typeof rule.conditions === 'string' 
-        ? JSON.parse(rule.conditions) 
-        : rule.conditions;
-      
-      if (!conditions) continue;
-      
-      for (const token of tokens) {
-        try {
-          let matched = false;
-          let confidence = 0.5;
-          let description = rule.description || rule.name;
-          
-          // Evaluate conditions against token data
-          const priceChange24h = token.priceChange24h ?? 0;
-          const priceChange1h = token.priceChange1h ?? 0;
-          const volume24h = token.volume24h ?? 0;
-          const liquidity = token.liquidity ?? 0;
-          const marketCap = token.marketCap ?? 0;
-          
-          // Check various condition types
-          if (conditions.priceChange24hMin !== undefined && priceChange24h >= conditions.priceChange24hMin) {
-            matched = true;
-            confidence += 0.1;
-          }
-          if (conditions.priceChange24hMax !== undefined && priceChange24h <= conditions.priceChange24hMax) {
-            matched = true;
-            confidence += 0.1;
-          }
-          if (conditions.priceChange1hMin !== undefined && priceChange1h >= conditions.priceChange1hMin) {
-            matched = true;
-            confidence += 0.1;
-          }
-          if (conditions.volumeMin !== undefined && volume24h >= conditions.volumeMin) {
-            matched = true;
-            confidence += 0.05;
-          }
-          if (conditions.liquidityMin !== undefined && liquidity >= conditions.liquidityMin) {
-            matched = true;
-            confidence += 0.05;
-          }
-          if (conditions.marketCapMax !== undefined && marketCap > 0 && marketCap <= conditions.marketCapMax) {
-            matched = true;
-            confidence += 0.05;
-          }
-          
-          // If conditions have a "type" field, use it for matching logic
-          if (conditions.type === 'VOLATILITY_SPIKE' && Math.abs(priceChange24h) > 10) {
-            matched = true;
-            confidence += 0.15;
-            description = `${rule.name}: Volatility spike detected (${priceChange24h.toFixed(1)}% 24h)`;
-          }
-          if (conditions.type === 'VOLUME_SURGE' && volume24h > 100000) {
-            matched = true;
-            confidence += 0.15;
-            description = `${rule.name}: Volume surge detected ($${(volume24h/1000).toFixed(0)}K 24h)`;
-          }
-          if (conditions.type === 'MOMENTUM_UP' && priceChange24h > 5 && priceChange1h > 2) {
-            matched = true;
-            confidence += 0.15;
-            description = `${rule.name}: Bullish momentum (${priceChange24h.toFixed(1)}% 24h, ${priceChange1h.toFixed(1)}% 1h)`;
-          }
-          if (conditions.type === 'MOMENTUM_DOWN' && priceChange24h < -5 && priceChange1h < -2) {
-            matched = true;
-            confidence += 0.15;
-            description = `${rule.name}: Bearish momentum (${priceChange24h.toFixed(1)}% 24h, ${priceChange1h.toFixed(1)}% 1h)`;
-          }
-          if (conditions.type === 'LOW_LIQUIDITY_RISK' && liquidity > 0 && liquidity < 50000) {
-            matched = true;
-            confidence += 0.15;
-            description = `${rule.name}: Low liquidity risk ($${liquidity.toFixed(0)})`;
-          }
-          
-          // Generic match: if no specific conditions matched but rule has no conditions object
-          if (!matched && Object.keys(conditions).length === 0) {
-            // Skip rules with empty conditions
-            continue;
-          }
-          
-          if (!matched) continue;
-          
-          // Cap confidence at 0.95
-          confidence = Math.min(confidence, 0.95);
-          
-          // Determine direction
-          const direction = priceChange24h > 0 ? 'BULLISH' : priceChange24h < 0 ? 'BEARISH' : 'NEUTRAL';
-          
-          // Create the signal
-          const signal = await db.signal.create({
-            data: {
-              type: 'PATTERN',
-              tokenId: token.id,
-              confidence: Math.round(confidence * 100),
-              direction,
-              description: description.slice(0, 500),
-              metadata: JSON.stringify({
-                patternRuleId: rule.id,
-                patternRuleName: rule.name,
-                category: rule.category || 'GENERAL',
-                conditions,
-                tokenSymbol: token.symbol,
-                tokenChain: token.chain,
-              }),
-            },
-          });
-          
-          signals.push(signal);
-        } catch (tokenError) {
-          // Skip individual token errors
+      c = typeof rule.conditions === 'string' ? JSON.parse(rule.conditions as string) : (rule.conditions || {});
+    } catch { continue; }
+    if (!c || Object.keys(c).length === 0) continue;
+
+    for (const token of tokens) {
+      try {
+        const pc24 = token.priceChange24h ?? 0;
+        const pc1h = token.priceChange1h ?? 0;
+        const vol = token.volume24h ?? 0;
+        const liq = token.liquidity ?? 0;
+
+        let matched = false;
+        let confidence = 0.5;
+        let desc = rule.description || rule.name;
+
+        // Flash Crash Recovery: dropThreshold + recoveryThreshold
+        if (c.dropThreshold !== undefined && pc24 < c.dropThreshold) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Flash crash (${pc24.toFixed(2)}% 24h, threshold ${c.dropThreshold}%)`;
         }
-      }
-    } catch (ruleError) {
-      console.error(`[PatternSignals] Error processing rule ${rule.id}:`, ruleError);
+
+        // Volume Spike: volumeMultiplier + minPriceChange
+        if (c.volumeMultiplier !== undefined && c.minPriceChange !== undefined && Math.abs(pc24) >= c.minPriceChange && vol > 1000000) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Volume spike (${pc24.toFixed(2)}%, vol $${(vol / 1e6).toFixed(1)}M)`;
+        }
+
+        // Liquidity Drain: liquidityDropPct + maxPriceChange
+        if (c.liquidityDropPct !== undefined && c.maxPriceChange !== undefined && Math.abs(pc24) <= c.maxPriceChange && liq > 0 && liq < 1000000) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Low liq with stable price (liq $${(liq / 1000).toFixed(0)}K)`;
+        }
+
+        // Bullish Divergence: h1Change + h24Change
+        if (c.h1Change !== undefined && c.h24Change !== undefined && pc24 < c.h24Change) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Divergence (24h ${pc24.toFixed(2)}% vs threshold ${c.h24Change}%)`;
+        }
+
+        // Rug Pull Pattern: minDrop + minVolume
+        if (c.minDrop !== undefined && c.minVolume !== undefined && pc24 <= c.minDrop && vol >= c.minVolume) {
+          matched = true; confidence += 0.15;
+          desc = `${rule.name}: Drop ${pc24.toFixed(2)}% vol $${(vol / 1e6).toFixed(1)}M`;
+        }
+
+        // V-Shape Bounce: min24hDrop + min1hBounce
+        if (c.min24hDrop !== undefined && pc24 <= c.min24hDrop) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: 24h drop ${pc24.toFixed(2)}% with bounce potential`;
+        }
+
+        // Momentum Breakout: minChange + minVolume
+        if (c.minChange !== undefined && c.minVolume !== undefined && Math.abs(pc24) >= c.minChange && vol >= c.minVolume) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: ${pc24 > 0 ? 'Up' : 'Down'} momentum ${pc24.toFixed(2)}% vol $${(vol / 1e6).toFixed(1)}M`;
+        }
+
+        // Smart Money Entry: min24hChange + min1hChange + minVolume
+        if (c.min24hChange !== undefined && c.minVolume !== undefined && pc24 >= c.min24hChange && vol >= c.minVolume) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Entry signal ${pc24.toFixed(2)}% vol $${(vol / 1e6).toFixed(1)}M`;
+        }
+
+        // Smart Money Exit: max24hChange + max1hChange + minVolume
+        if (c.max24hChange !== undefined && c.minVolume !== undefined && pc24 <= c.max24hChange && vol >= c.minVolume) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Exit signal ${pc24.toFixed(2)}% vol $${(vol / 1e6).toFixed(1)}M`;
+        }
+
+        // Liquidity Trap: maxLiquidity + volumeRatio
+        if (c.maxLiquidity !== undefined && c.volumeRatio !== undefined && liq > 0 && liq <= c.maxLiquidity && vol > liq * c.volumeRatio) {
+          matched = true; confidence += 0.15;
+          desc = `${rule.name}: Trap liq $${(liq / 1000).toFixed(0)}K with high vol ratio`;
+        }
+
+        // Trend Reversal: min1hAbs + min24hAbs
+        if (c.min24hAbs !== undefined && Math.abs(pc24) >= c.min24hAbs) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Strong move ${pc24.toFixed(2)}% suggesting reversal`;
+        }
+
+        // Accumulation Zone: maxPriceChange + minVolume
+        if (c.maxPriceChange !== undefined && c.minVolume !== undefined && Math.abs(pc24) <= c.maxPriceChange && vol >= c.minVolume) {
+          matched = true; confidence += 0.1;
+          desc = `${rule.name}: Low volatility ${pc24.toFixed(2)}% with high vol $${(vol / 1e6).toFixed(1)}M`;
+        }
+
+        if (!matched) continue;
+
+        confidence = Math.min(confidence, 0.95);
+        const direction = pc24 > 1 ? 'BULLISH' : pc24 < -1 ? 'BEARISH' : 'NEUTRAL';
+
+        const signal = await db.signal.create({
+          data: {
+            type: 'PATTERN',
+            tokenId: token.id,
+            confidence: Math.round(confidence * 100),
+            direction,
+            description: desc.slice(0, 500),
+            metadata: JSON.stringify({
+              patternRuleId: rule.id,
+              patternRuleName: rule.name,
+              category: rule.category || 'GENERAL',
+              conditions: c,
+              tokenSymbol: token.symbol,
+              tokenChain: token.chain,
+            }),
+          },
+        });
+        signals.push(signal);
+      } catch { /* skip individual token errors */ }
     }
   }
-  
+
   console.log(`[PatternSignals] Created ${signals.length} pattern signals`);
   return { signals, count: signals.length };
 }
