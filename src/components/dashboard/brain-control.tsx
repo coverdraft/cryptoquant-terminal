@@ -266,7 +266,7 @@ export default function BrainControl() {
         throw new Error(errBody.error || `HTTP ${res.status}`);
       }
       const json = await res.json();
-      setData(json);
+      setData(json.data || json);
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch scheduler status');
