@@ -17,6 +17,7 @@ interface ApiTokenData {
   symbol: string;
   name: string;
   chain: string;
+  address?: string;
   priceUsd: number;
   volume24h: number;
   liquidity: number;
@@ -142,11 +143,15 @@ export function TokenFlow() {
     }
 
     // Start with API tokens (real DexScreener data)
-    const merged: Array<TokenData & { _dataSource: 'api' | 'ws'; _apiSource?: string }> = [];
+    const merged: Array<TokenData & { _dataSource: 'api' | 'ws'; _apiSource?: string; _address?: string }> = [];
 
     const seenSymbols = new Set<string>();
 
     for (const apiToken of apiTokens) {
+      const symbolKey = `${apiToken.symbol.toUpperCase()}-${normalizeChain(apiToken.chain)}`;
+      // Skip duplicate symbols on the same chain
+      if (seenSymbols.has(symbolKey)) continue;
+
       const wsToken = wsBySymbol.get(apiToken.symbol.toUpperCase());
       const normalizedChain = normalizeChain(apiToken.chain);
 
@@ -168,18 +173,22 @@ export function TokenFlow() {
         priceHistory: wsToken?.priceHistory,
         _dataSource: 'api',
         _apiSource: apiSourceFlag,
-      } as TokenData & { _dataSource: 'api'; _apiSource: string });
+        _address: apiToken.address || apiToken.id,
+      } as TokenData & { _dataSource: 'api'; _apiSource: string; _address?: string });
 
-      seenSymbols.add(apiToken.symbol.toUpperCase());
+      seenSymbols.add(symbolKey);
     }
 
     // Add WS-only tokens not already in API data
     for (const wsToken of wsTokens) {
-      if (!seenSymbols.has(wsToken.symbol.toUpperCase())) {
+      const symbolKey = `${wsToken.symbol.toUpperCase()}-${normalizeChain(wsToken.chain)}`;
+      if (!seenSymbols.has(symbolKey)) {
         merged.push({
           ...wsToken,
           _dataSource: 'ws' as const,
-        } as TokenData & { _dataSource: 'ws' });
+          _address: (wsToken as any).address || wsToken.id,
+        } as TokenData & { _dataSource: 'ws'; _address?: string });
+        seenSymbols.add(symbolKey);
       }
     }
 
@@ -376,7 +385,7 @@ export function TokenFlow() {
 
               return (
                 <tr
-                  key={`${token.symbol}-${token.chain}`}
+                  key={(token as any)._address || (token as any).id || `${token.symbol}-${token.chain}-${mergedTokens.indexOf(token)}`}
                   onClick={() => selectToken(token)}
                   className={`cursor-pointer transition-colors border-b border-[#1e293b]/50 hover:bg-[#1a1f2e] ${
                     isSelected ? 'bg-[#d4af37]/10 border-l-2 border-l-[#d4af37]' : ''
