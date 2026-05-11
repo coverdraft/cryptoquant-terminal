@@ -43,9 +43,9 @@ npx prisma generate
 echo "🗄️  Creando base de datos..."
 npx prisma migrate dev
 
-# 8. Seed - usando tsx directamente
-echo "🌱 Poblando base de datos con datos de ejemplo..."
-DATABASE_URL="file:./dev.db" npx tsx prisma/seed.ts
+# 8. Seed masivo - 5100+ tokens, 550 traders, 5000 DNA, velas, señales, etc.
+echo "🌱 Poblando base de datos con datos MASIVOS..."
+DATABASE_URL="file:./dev.db" npx tsx scripts/massive-local-seed.ts
 
 echo ""
 echo "✅ ¡Instalación completada!"
