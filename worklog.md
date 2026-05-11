@@ -107,3 +107,26 @@ Stage Summary:
 - Download files ready: cryptoquant-terminal.tar.gz (859KB) + instalar-cryptoquant.sh (13KB)
 - GitHub repo: https://github.com/coverdraft/cryptoquant-terminal.git
 - User needs to download both files, run installer, then push to GitHub with Personal Access Token
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: FASE 1 - Massive Data Expansion (read instruction file, fix git, expand data)
+
+Work Log:
+- Read instruction file: upload/texto programacion pasos a seguir.txt (199 lines, 12 FASES)
+- Fixed git index: rm -f .git/index .git/MERGE_HEAD .git/MERGE_MSG .git/MERGE_MODE && git read-tree HEAD
+- Connected remote with PAT, fetched origin/main (10 commits), reset to remote
+- Modified brain/init/route.ts: CoinGecko 1250→5000+, Volume 500→1000, DexScreener 100→2000 (batched)
+- Created scripts/seed-traders.ts: 550 traders (275 SmartMoney, 206 Whales, 69 Snipers, 206 Bots)
+- Created scripts/seed-events.ts: 2400 UserEvents + 240 PredictiveSignals
+- Created scripts/compute-token-dna.ts + recompute-dna.ts: TokenDNA for ALL tokens
+- Final DNA distribution: 123 SAFE, 2933 WARNING, 1956 DANGER
+- Cleaned .next cache to fix schema mismatch, restarted dev server
+- Committed and pushed (5a06934) to GitHub
+
+Stage Summary:
+- FASE 1 COMPLETE: 5027 tokens, 550 traders, 5012 TokenDNA, 2400 events, 240 predictive signals
+- Dashboard: totalTokens:5027, dangerTokens:1956, safeTokens:131, smartMoneyWallets:275
+- Threat level improved: HIGH → LOW
+- DexScreener liquidity pending (needs live API calls during init)
