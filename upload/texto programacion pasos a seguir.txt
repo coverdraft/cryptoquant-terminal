@@ -1,0 +1,199 @@
+ # CryptoQuant Terminal - Continuación de Expansión Masiva
+
+## Proyecto
+- Repo: https://github.com/coverdraft/cryptoquant-terminal.git
+- Ruta servidor: /home/z/my-project/
+- Tech: Next.js 16.1.3, Prisma + SQLite, CoinGecko, DexScreener, DexPaprika
+- Idioma: Español
+
+## PRIMERO: Arreglar git index corrupto
+cd /home/z/my-project && rm -f .git/index .git/MERGE_HEAD .git/MERGE_MSG .git/MERGE_MODE && git read-tree HEAD && git status
+
+## Estado actual (stats del dashboard)
+- totalTokens: 1250
+- activeSignals: 934
+- patternSignals: 119
+- liquidityTrapSignals: 396
+- rugPullSignals: 77
+- smartMoneySignals: 20
+- vShapeSignals: 18
+- predictiveSignals: 28
+- tokensWithLiquidity: 90 (solo 7.2% de 1250!)
+- safeTokens: 58
+- dangerTokens: 0 (!!!)
+- smartMoneyWallets: 10 (datos semilla, no escalados)
+- recentEvents: 50 (datos semilla, no escalados)
+- fomoIndex: 30, threatLevel: HIGH
+
+## OBJETIVOS DE EXPANSIÓN
+
+### 1. Expandir tokens de 1250 a 5000+
+- Archivo: src/app/api/brain/init/route.ts — aumentar páginas CoinGecko
+- Actualmente usa ~12 páginas (250 tokens/página = 1250)
+- Necesitamos ~20+ páginas para 5000+ tokens
+
+### 2. Expandir DexScreener enrichment (tokensWithLiquidity: 90→2000+)
+- Archivo: src/lib/services/brain-pipeline.ts — STEP 3 DexScreener
+- Actualmente solo enriquece 90 de 1250 tokens
+- Aumentar rate limiting, batch size, y coverage
+
+### 3. Expandir Smart Money Wallets de 10 a 500+
+- Base de datos: tabla SmartMoneyWallet
+- Necesitamos generar wallets realistas con diferentes categorías:
+  whale, degen, sniper, early_investor, mev_bot, nft_whale
+- Con balances, win rates, y chain diversidad realista
+
+### 4. Computar TokenDNA para TODOS los tokens (dangerTokens: 0→2000+)
+- Archivo: src/lib/services/brain-pipeline.ts — STEP 4 TokenDNA
+- Actualmente solo 60 tokens tienen DNA computado
+- El DNA determina safe/danger/warning classification
+- Sin DNA no hay dangerTokens detectados
+
+### 5. Expandir Recent Events de 50 a 1000+
+- Tabla UserEvent en la BD
+- Generar eventos variados: token_listed, price_alert, rug_pull_detected, 
+  smart_money_move, volume_spike, liquidity_change, pattern_detected
+
+### 6. Verificar signals tras expansión
+- patternSignals, predictiveSignals, smartMoneySignals deberían aumentar
+- con más tokens y wallets, las señales mejoran significativamente
+
+## Archivos clave del proyecto
+- src/lib/services/brain-pipeline.ts — Pipeline de 12 pasos (STEP 4b = pattern signals)
+- src/lib/services/signal-generators.ts — Generadores de señales (condiciones: minDrop, minVolume, min24hChange, etc.)
+- src/app/api/brain/init/route.ts — Inicialización, fetch tokens de CoinGecko
+- src/app/api/dashboard/stats/route.ts — Stats del dashboard
+- scripts/seed-missing-data.ts — Script de datos semilla
+- prisma/schema.prisma — Schema de la BD
+
+## Notas importantes
+- Las condiciones de signal-generators.ts usan nombres como: minDrop, minVolume, min24hChange, minLiquidity, minPriceChange, maxAge, etc.
+- TokenDNA usa scoring: compositeScore = (volatility * 0.3) + (volumeScore * 0.2) + (ageScore * 0.15) + (liquidityScore * 0.2) + (concentrationScore * 0.15)
+- classification: SAFE (score > 70), WARNING (40-70), DANGER (< 40)
+- CoinGecko free tier: ~30 requests/min, 250 tokens por página
+- DexScreener free: sin auth needed, pero rate limit ~300 requests/min
+
+Por favor empieza arreglando el git index y luego procede con la expansión en orden. Commit y push después de cada paso mayor.  [PEGA AQUÍ TODO EL CONTEXTO QUE TE DI ANTES + LO SIGUIENTE:]
+
+## PIPELINE COMPLETO A IMPLEMENTAR (además de la expansión de datos)
+
+### Fase 1: Expansión de Datos (ya descrita arriba)
+
+### Fase 2: Motor de Análisis Avanzado
+1. Candlestick Pattern Scanner - 30+ patrones (doji, hammer, engulfing, etc.) multi-timeframe (1m, 5m, 15m, 1h, 4h, 1d)
+2. Behavioral Prediction - 8 arquetipos (whale, degen, sniper, early_investor, mev_bot, nft_whale, airdrop_farmer, bridging_whale) × 6 fases (accumulation, markup, distribution, markdown, consolidation, breakout) con modelo Bayesiano
+3. Cross-Correlation Engine - P(outcome | trader_type + pattern + phase)
+4. Observation Auto-Recorder - cada ciclo graba datos para aprendizaje
+
+### Fase 3: IA y Estrategia
+5. Deep Analysis con z-ai-sdk (z-ai-web-dev-sdk) - razonamiento estructurado
+6. Strategy Selection - sistema + dirección + entry/exit/size
+
+### Fase 4: Ejecución y Aprendizaje
+7. Prediction Storage - guarda predicciones para validar después
+8. Autonomous Execution - paper trading con stops
+9. Outcome Evaluation (4h windows) - ¿acertó? actualiza modelos
+10. Bayesian Model Update - aprende de aciertos/fallos
+11. Continuous Loop - test→eval→improve→re-test
+
+### Archivos clave:
+- src/lib/services/brain-pipeline.ts (12-step pipeline)
+- src/lib/services/signal-generators.ts (condiciones: minDrop, minVolume, etc.)
+- prisma/schema.prisma (tablas: Token, TokenDNA, SmartMoneyWallet, UserEvent, Signal, etc.)
+
+PRIORIDAD: Primero arreglar git index, luego Fase 1 (datos), luego Fase 2-4 en orden.  # CryptoQuant Terminal - Expansión Masiva + Pipeline Completo
+
+## PRIMERO: Arreglar git index corrupto
+cd /home/z/my-project && rm -f .git/index .git/MERGE_HEAD .git/MERGE_MSG .git/MERGE_MODE && git read-tree HEAD && git status
+
+## Proyecto
+- Repo: https://github.com/coverdraft/cryptoquant-terminal.git
+- Ruta servidor: /home/z/my-project/
+- Tech: Next.js 16.1.3 (Turbopack), Prisma + SQLite, Node.js v22.17.0
+- Datos: CoinGecko (free), DexScreener (free), DexPaprika (free)
+- Idioma: Español
+
+## Estado actual (stats dashboard)
+- totalTokens: 1250 | activeSignals: 934
+- patternSignals: 119 | liquidityTrapSignals: 396 | rugPullSignals: 77
+- smartMoneySignals: 20 | vShapeSignals: 18 | predictiveSignals: 28
+- tokensWithLiquidity: 90/1250 (7.2%!) | safeTokens: 58 | dangerTokens: 0
+- smartMoneyWallets: 10 (semilla) | recentEvents: 50 (semilla)
+- fomoIndex: 30 | threatLevel: HIGH
+
+## Archivos clave
+- src/lib/services/brain-pipeline.ts — Pipeline 12 pasos (STEP 4b = pattern signals)
+- src/lib/services/signal-generators.ts — Condiciones: minDrop, minVolume, min24hChange, minLiquidity, minPriceChange, maxAge
+- src/app/api/brain/init/route.ts — Fetch tokens CoinGecko (~12 págs = 1250 tokens)
+- src/app/api/dashboard/stats/route.ts — Stats del dashboard
+- scripts/seed-missing-data.ts — Script datos semilla
+- prisma/schema.prisma — Schema BD (Token, TokenDNA, SmartMoneyWallet, UserEvent, Signal, etc.)
+
+## TokenDNA scoring
+compositeScore = (volatility * 0.3) + (volumeScore * 0.2) + (ageScore * 0.15) + (liquidityScore * 0.2) + (concentrationScore * 0.15)
+SAFE > 70 | WARNING 40-70 | DANGER < 40
+
+## PLAN DE EXPANSIÓN
+
+### FASE 1: Expansión de Datos (PRIORIDAD INMEDIATA)
+1. Tokens 1250→5000+ (aumentar páginas CoinGecko de ~12 a 20+)
+2. DexScreener enrichment: tokensWithLiquidity 90→2000+ (aumentar batch size y coverage)
+3. Smart Money Wallets: 10→500+ (generar wallets realistas con categorías: whale, degen, sniper, early_investor, mev_bot, nft_whale, airdrop_farmer, bridging_whale)
+4. TokenDNA para TODOS los tokens (dangerTokens: 0→2000+)
+5. Recent Events: 50→1000+ (token_listed, price_alert, rug_pull_detected, smart_money_move, volume_spike, liquidity_change, pattern_detected)
+
+### FASE 2: Candlestick Pattern Scanner (30+ patrones, multi-timeframe)
+Patrones: doji, hammer, inverted_hammer, engulfing_bull, engulfing_bear, morning_star, evening_star, three_white_soldiers, three_black_crows, piercing_line, dark_cloud_cover, harami_bull, harami_bear, tweezers_top, tweezers_bottom, spinning_top, marubozu_bull, marubozu_bear, shooting_star, hanging_man, rising_three_methods, falling_three_methods, abandoned_baby_bull, abandoned_baby_bear, tri_star_bull, tri_star_bear, belt_hold_bull, belt_hold_bear, counterattack_bull, counterattack_bear
+Timeframes: 1m, 5m, 15m, 1h, 4h, 1d
+
+### FASE 3: Behavioral Prediction Engine (Bayesiano)
+8 arquetipos: whale, degen, sniper, early_investor, mev_bot, nft_whale, airdrop_farmer, bridging_whale
+6 fases: accumulation, markup, distribution, markdown, consolidation, breakout
+Modelo Bayesiano: P(behavior | archetype, phase, market_conditions)
+
+### FASE 4: Cross-Correlation Engine
+P(outcome | trader_type + pattern + phase + liquidity + volume)
+Matriz de correlación entre señales y resultados históricos
+
+### FASE 5: Auto-Record Observations
+Cada ciclo del pipeline graba: timestamp, token, signals_detected, market_state, prediction_made
+Tabla Observation en Prisma schema
+
+### FASE 6: Deep Analysis + LLM
+Integrar z-ai-web-dev-sdk (ya instalado en el proyecto) para razonamiento estructurado
+Usar en backend: import ZAI from 'z-ai-web-dev-sdk'
+Análisis profundo de señales + contexto de mercado
+
+### FASE 7: Strategy Selection Engine
+Generar estrategia: sistema + dirección (long/short) + entry price + stop loss + take profit + position size
+Basado en: signals + patterns + behavioral prediction + cross-correlation
+
+### FASE 8: Prediction Storage + Validation
+Tabla Prediction: token, direction, entry_price, target_price, stop_loss, confidence, created_at, resolved_at, outcome
+Validar predicciones automáticamente
+
+### FASE 9: Autonomous Paper Trading
+Ejecución simulada con stops automáticos
+Tracking de P&L, win rate, Sharpe ratio
+Sin dinero real - solo paper trading
+
+### FASE 10: Outcome Evaluation (4h windows)
+¿Acertó la predicción? Comparar con precio real a las 4h
+Calcular accuracy por tipo de señal, arquetipo, patrón
+
+### FASE 11: Bayesian Model Update
+Actualizar priors basado en resultados
+P(pattern→outcome) se ajusta con cada evaluación
+El sistema aprende de sus aciertos y fallos
+
+### FASE 12: Continuous Improvement Loop
+test→eval→improve→re-test automático
+Cada ciclo mejora la precisión del sistema
+
+## IMPORTANTE
+- Commit y push después de cada fase completada
+- Verificar que el dashboard refleje los cambios
+- CoinGecko free: ~30 req/min, 250 tokens/página
+- DexScreener free: sin auth, rate limit ~300 req/min
+- El z-ai-web-dev-sdk SOLO se usa en backend, nunca en client side
+- Ejemplo z-ai-sdk: const zai = await ZAI.create(); const completion = await zai.chat.completions.create({messages: [...]})
