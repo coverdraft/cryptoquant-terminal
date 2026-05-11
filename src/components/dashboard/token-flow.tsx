@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
-import { Database, RefreshCw, Loader2, Radio } from 'lucide-react';
+import { Database, RefreshCw, Loader2, Radio, Download } from 'lucide-react';
 
 // ============================================================
 // API RESPONSE TYPES
@@ -103,25 +103,34 @@ export function TokenFlow() {
   const { tokens: wsTokens, selectedToken, selectToken, chainFilter, setChainFilter, riskFilter, setRiskFilter, sortBy, setSortBy } = useCryptoStore();
   const [search, setSearch] = useState('');
   const [useLiveData, setUseLiveData] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Fetch real token data from DexScreener API
-  const { data: apiTokensData, isLoading: apiLoading, data: apiSource } = useQuery({
-    queryKey: ['market-tokens', chainFilter],
+  // Fetch ALL token data from DB - with pagination support
+  const { data: apiTokensData, isLoading: apiLoading } = useQuery({
+    queryKey: ['market-tokens', chainFilter, riskFilter, sortBy, search],
     queryFn: async () => {
       try {
         const chain = chainFilter === 'ALL' ? 'all' : chainFilter.toLowerCase();
-        const res = await fetch(`/api/market/tokens?chain=${chain}&limit=50`);
+        const params = new URLSearchParams({
+          chain,
+          limit: '500', // Fetch 500 at a time
+          offset: '0',
+        });
+        if (search) params.set('search', search);
+        const res = await fetch(`/api/market/tokens?${params}`);
         if (!res.ok) throw new Error('Failed to fetch');
         const json = await res.json();
         return {
           tokens: (json.data || []) as ApiTokenData[],
-          source: json.source as 'live' | 'fallback',
+          source: json.source as string,
+          total: json.total || 0,
+          hasMore: json.hasMore || false,
         };
       } catch {
-        return { tokens: [] as ApiTokenData[], source: 'fallback' as const };
+        return { tokens: [] as ApiTokenData[], source: 'fallback' as const, total: 0, hasMore: false };
       }
     },
-    refetchInterval: 30000, // Refresh every 30s
+    refetchInterval: 30000,
     staleTime: 15000,
     enabled: useLiveData,
   });
@@ -241,6 +250,7 @@ export function TokenFlow() {
   const apiTokenCount = mergedTokens.filter(t => (t as TokenData & { _dataSource: string })._dataSource === 'api').length;
   const wsTokenCount = mergedTokens.filter(t => (t as TokenData & { _dataSource: string })._dataSource === 'ws').length;
   const effectiveSource = apiTokensData?.source || 'fallback';
+  const totalDbTokens = apiTokensData?.total || 0;
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] border border-[#1e293b] rounded-lg overflow-hidden">
@@ -253,7 +263,7 @@ export function TokenFlow() {
           {/* Data source stats */}
           {useLiveData && (
             <span className="text-[9px] font-mono text-[#64748b]">
-              {apiTokenCount} live{wsTokenCount > 0 ? ` + ${wsTokenCount} WS` : ''}
+              {apiTokenCount} DB{wsTokenCount > 0 ? ` + ${wsTokenCount} WS` : ''} | Total: {totalDbTokens.toLocaleString()}
             </span>
           )}
 
@@ -287,6 +297,30 @@ export function TokenFlow() {
           </Button>
 
           {apiLoading && <Loader2 className="h-3 w-3 text-[#d4af37] animate-spin" />}
+
+          {/* Sync Real Data Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isSyncing}
+            onClick={async () => {
+              setIsSyncing(true);
+              try {
+                // Trigger brain init to fetch real data
+                await fetch('/api/brain/init');
+                // Also trigger data sync for real API data
+                fetch('/api/data-sync?chain=all', { method: 'GET' }).catch(() => {});
+              } catch {}
+              // Let the sync run for a bit before re-querying
+              setTimeout(() => setIsSyncing(false), 5000);
+            }}
+            className={`h-5 px-1.5 text-[9px] font-mono ${
+              isSyncing ? 'text-[#d4af37]' : 'text-[#64748b] hover:text-[#d4af37]'
+            }`}
+          >
+            {isSyncing ? <Loader2 className="h-2.5 w-2.5 mr-1 animate-spin" /> : <Download className="h-2.5 w-2.5 mr-1" />}
+            {isSyncing ? 'Syncing...' : 'Sync'}
+          </Button>
         </div>
       </div>
 

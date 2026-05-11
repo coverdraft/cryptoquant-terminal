@@ -32,7 +32,7 @@ interface TokenData {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const chain = searchParams.get('chain') || 'solana';
-  const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
+  const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 5000);
 
   try {
     // Build chain filter - include 'ALL' chain tokens (CoinGecko top tokens) for any chain
@@ -41,23 +41,41 @@ export async function GET(request: NextRequest) {
       const chainUpper = chain.toUpperCase();
       if (chainUpper === 'SOLANA') {
         chainFilter = { in: ['SOL', 'SOLANA', 'ALL'] };
+      } else if (chainUpper === 'EVM') {
+        chainFilter = { in: ['ETH', 'BASE', 'ARB', 'OP', 'BSC', 'MATIC'] };
       } else {
         chainFilter = { in: [chainUpper, 'ALL'] };
       }
     }
 
-    const dbTokens = await db.token.findMany({
-      where: chainFilter ? { chain: chainFilter } : undefined,
-      include: { dna: true },
-      orderBy: { volume24h: 'desc' },
-      take: limit,
-    });
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const search = searchParams.get('search') || '';
+
+    let where: any = chainFilter ? { chain: chainFilter } : {};
+    if (search) {
+      where.OR = [
+        { symbol: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [dbTokens, totalCount] = await Promise.all([
+      db.token.findMany({
+        where,
+        include: { dna: true },
+        orderBy: { volume24h: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      db.token.count({ where }),
+    ]);
 
     const tokens: TokenData[] = dbTokens.map(t => ({
       id: t.id,
       symbol: t.symbol,
       name: t.name,
       chain: t.chain,
+      address: t.address,
       priceUsd: t.priceUsd,
       volume24h: t.volume24h,
       liquidity: t.liquidity,
@@ -66,7 +84,7 @@ export async function GET(request: NextRequest) {
       priceChange15m: t.priceChange15m,
       priceChange1h: t.priceChange1h,
       priceChange24h: t.priceChange24h,
-      priceChange7d: 0,
+      priceChange7d: t.priceChange6h,
       riskScore: t.dna?.riskScore ?? undefined,
     }));
 
@@ -74,6 +92,10 @@ export async function GET(request: NextRequest) {
       data: tokens,
       error: null,
       source: tokens.length > 0 ? 'db' : 'empty',
+      total: totalCount,
+      offset,
+      limit,
+      hasMore: offset + tokens.length < totalCount,
     });
   } catch (error) {
     console.error('[/api/market/tokens] DB query failed:', error);
