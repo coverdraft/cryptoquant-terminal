@@ -10,6 +10,11 @@ export const dynamic = 'force-dynamic';
  * SERVES FROM DB ONLY. No external API calls here.
  * The background refresh is handled by /api/brain/init scheduler.
  * This prevents OOM crashes from external API calls.
+ *
+ * Each token includes a `status` field:
+ *   - 'LIVE': Has pairAddress (enriched by DexScreener/DexPaprika)
+ *   - 'ACTIVE': Has liquidity > 0 AND volume24h > 0 (real CoinGecko data)
+ *   - 'DISCOVERED': In DB but no enrichment yet
  */
 
 interface TokenData {
@@ -17,6 +22,7 @@ interface TokenData {
   symbol: string;
   name: string;
   chain: string;
+  address: string;
   priceUsd: number;
   volume24h: number;
   liquidity: number;
@@ -27,6 +33,19 @@ interface TokenData {
   priceChange24h: number;
   priceChange7d: number;
   riskScore?: number;
+  status: 'LIVE' | 'ACTIVE' | 'DISCOVERED';
+  pairAddress?: string | null;
+  dexId?: string | null;
+}
+
+function determineTokenStatus(token: {
+  pairAddress: string | null;
+  liquidity: number;
+  volume24h: number;
+}): 'LIVE' | 'ACTIVE' | 'DISCOVERED' {
+  if (token.pairAddress) return 'LIVE';
+  if (token.liquidity > 0 && token.volume24h > 0) return 'ACTIVE';
+  return 'DISCOVERED';
 }
 
 export async function GET(request: NextRequest) {
@@ -50,12 +69,21 @@ export async function GET(request: NextRequest) {
 
     const offset = parseInt(searchParams.get('offset') || '0', 10);
     const search = searchParams.get('search') || '';
+    const statusFilter = searchParams.get('status') || '';
 
     let where: any = chainFilter ? { chain: chainFilter } : {};
     if (search) {
       where.OR = [
         { symbol: { contains: search, mode: 'insensitive' } },
         { name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    if (statusFilter === 'live') {
+      where.pairAddress = { not: null };
+    } else if (statusFilter === 'active') {
+      where.AND = [
+        { liquidity: { gt: 0 } },
+        { volume24h: { gt: 0 } },
       ];
     }
 
@@ -70,23 +98,34 @@ export async function GET(request: NextRequest) {
       db.token.count({ where }),
     ]);
 
-    const tokens: TokenData[] = dbTokens.map(t => ({
-      id: t.id,
-      symbol: t.symbol,
-      name: t.name,
-      chain: t.chain,
-      address: t.address,
-      priceUsd: t.priceUsd,
-      volume24h: t.volume24h,
-      liquidity: t.liquidity,
-      marketCap: t.marketCap,
-      priceChange5m: t.priceChange5m,
-      priceChange15m: t.priceChange15m,
-      priceChange1h: t.priceChange1h,
-      priceChange24h: t.priceChange24h,
-      priceChange7d: t.priceChange6h,
-      riskScore: t.dna?.riskScore ?? undefined,
-    }));
+    const tokens: TokenData[] = dbTokens.map(t => {
+      const status = determineTokenStatus(t);
+      return {
+        id: t.id,
+        symbol: t.symbol,
+        name: t.name,
+        chain: t.chain,
+        address: t.address,
+        priceUsd: t.priceUsd,
+        volume24h: t.volume24h,
+        liquidity: t.liquidity,
+        marketCap: t.marketCap,
+        priceChange5m: t.priceChange5m,
+        priceChange15m: t.priceChange15m,
+        priceChange1h: t.priceChange1h,
+        priceChange24h: t.priceChange24h,
+        priceChange7d: t.priceChange6h,
+        riskScore: t.dna?.riskScore ?? undefined,
+        status,
+        pairAddress: t.pairAddress,
+        dexId: t.dexId,
+      };
+    });
+
+    // Status counts
+    const liveCount = tokens.filter(t => t.status === 'LIVE').length;
+    const activeCount = tokens.filter(t => t.status === 'ACTIVE').length;
+    const discoveredCount = tokens.filter(t => t.status === 'DISCOVERED').length;
 
     return NextResponse.json({
       data: tokens,
@@ -96,6 +135,7 @@ export async function GET(request: NextRequest) {
       offset,
       limit,
       hasMore: offset + tokens.length < totalCount,
+      statusBreakdown: { live: liveCount, active: activeCount, discovered: discoveredCount },
     });
   } catch (error) {
     console.error('[/api/market/tokens] DB query failed:', error);

@@ -29,7 +29,10 @@ rm -f prisma/dev.db prisma/dev.db-journal db/*.db
 
 # 4. Crear .env
 echo "📝 Configurando entorno..."
-echo 'DATABASE_URL="file:./dev.db"' > .env
+cat > .env << 'EOF'
+DATABASE_URL="file:./dev.db"
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+EOF
 
 # 5. Instalar dependencias
 echo "📦 Instalando dependencias..."
@@ -41,11 +44,11 @@ npx prisma generate
 
 # 7. Aplicar migración
 echo "🗄️  Creando base de datos..."
-npx prisma migrate dev
+npx prisma db push
 
-# 8. Seed masivo - 5100+ tokens, 550 traders, 5000 DNA, velas, señales, etc.
-echo "🌱 Poblando base de datos con datos MASIVOS..."
-DATABASE_URL="file:./dev.db" npx tsx scripts/massive-local-seed.ts
+# 8. Bootstrap seed - templates, behavior models, capital state
+echo "🌱 Poblando base de datos (bootstrap)..."
+DATABASE_URL="file:./dev.db" npx tsx prisma/seed.ts
 
 echo ""
 echo "✅ ¡Instalación completada!"
@@ -54,3 +57,12 @@ echo "Para arrancar el terminal ejecuta:"
 echo "  npm run dev"
 echo ""
 echo "Luego abre: http://localhost:3000"
+echo ""
+echo "📊 Para cargar datos REALES de CoinGecko + DexScreener + DexPaprika:"
+echo "  curl -X POST http://localhost:3000/api/data-loader -H 'Content-Type: application/json' -d '{\"action\":\"quick\"}'"
+echo ""
+echo "  Para carga completa (10,000+ tokens):"
+echo "  curl -X POST http://localhost:3000/api/data-loader -H 'Content-Type: application/json' -d '{\"action\":\"full\"}'"
+echo ""
+echo "  Para ver estado de carga:"
+echo "  curl http://localhost:3000/api/data-loader"

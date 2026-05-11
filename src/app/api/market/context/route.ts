@@ -30,6 +30,7 @@ interface MarketContextData {
   computedAt: string;
   source: DataSource;
   liveTokenCount: number;
+  activeTokenCount: number;
   signalBreakdown: Record<string, number>;
 }
 
@@ -589,6 +590,7 @@ function buildMarketContext(
   signalsMap: Record<string, { prediction: string; confidence: number }[]>,
   source: DataSource,
   liveTokenCount: number,
+  activeTokenCount: number,
   chains: string[],
 ): Omit<MarketContextData, 'tokenCount' | 'signalCount' | 'signalBreakdown'> {
   const regimeSignals = signalsMap['REGIME_CHANGE'] || [];
@@ -611,6 +613,7 @@ function buildMarketContext(
     computedAt: new Date().toISOString(),
     source,
     liveTokenCount,
+    activeTokenCount,
   };
 }
 
@@ -671,6 +674,7 @@ export async function GET() {
     // ---------------------------------------------------------
 
     let liveTokenCount = 0;
+    let activeTokenCount = 0;
     const enrichedTokens = dbTokens.map((t) => {
       // Try matching by pairAddress first, then by token address
       let live = t.pairAddress
@@ -681,7 +685,15 @@ export async function GET() {
         live = liveDex.byTokenAddress.get(t.address.toLowerCase());
       }
 
-      if (live) liveTokenCount++;
+      // Count "live" tokens: those with DexScreener real-time match
+      // OR tokens with pairAddress (enriched by DexScreener/DexPaprika)
+      // OR tokens with liquidity AND volume (have real market data from CoinGecko)
+      const isLive = !!(live || t.pairAddress);
+      const isActive = !!(t.liquidity > 0 && t.volume24h > 0);
+
+      if (isLive) liveTokenCount++;
+      if (isActive) activeTokenCount++;
+
       return {
         chain: t.chain,
         priceChange1h: live?.priceChange1h ?? t.priceChange1h,
@@ -694,11 +706,10 @@ export async function GET() {
       };
     });
 
-    // Determine source tier — only mark as 'live' if we actually enriched tokens
-    if (liveTokenCount > 0) {
+    // Determine source tier — only mark as 'live' if we have enriched tokens
+    if (liveTokenCount > 0 || activeTokenCount > 0) {
       source = 'live';
     } else if (liveDex.byPairAddress.size > 0 || liveDex.byTokenAddress.size > 0) {
-      // We got DexScreener data but couldn't match to DB tokens — still use token data
       source = 'computed';
     } else if (dbTokens.length > 0) {
       source = 'computed';
@@ -727,7 +738,7 @@ export async function GET() {
       signalBreakdown[type] = sigs.length;
     }
 
-    const contextBase = buildMarketContext(enrichedTokens, signalsMap, source, liveTokenCount, chains);
+    const contextBase = buildMarketContext(enrichedTokens, signalsMap, source, liveTokenCount, activeTokenCount, chains);
 
     const data: MarketContextData = {
       ...contextBase,
@@ -787,7 +798,7 @@ export async function GET() {
         },
       });
 
-      const contextBase = buildMarketContext(dbTokens, signalsMap, 'computed', 0, chains);
+      const contextBase = buildMarketContext(dbTokens, signalsMap, 'computed', 0, 0, chains);
 
       const data: MarketContextData = {
         ...contextBase,

@@ -744,12 +744,14 @@ function generateWalletAddress(chain: string): string {
 export async function GET() {
   if (!initTriggered) {
     initTriggered = true;
+
+    // Use RealDataLoader for production-quality data loading
     backgroundInit().catch(err => console.error('[BrainInit] Background init error:', err));
   }
 
   return NextResponse.json({
     success: true,
     action: 'initializing',
-    message: 'Brain init started - fetching 5000+ tokens (paginated) + trending + volume (1000) + DexScreener enrichment (2000) + signals + DNA (ALL)',
+    message: 'Brain init started — RealDataLoader: CoinGecko (10K tokens) + DexScreener enrichment + DexPaprika cross-chain + OHLCV candles + Token DNA + lifecycle phases',
   });
 }
