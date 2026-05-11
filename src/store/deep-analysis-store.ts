@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import type { DeepAnalysis, ThinkingDepth } from '@/lib/services/deep-analysis-engine';
+import type { DeepAnalysis as DeepAnalysisType, ThinkingDepth } from '@/lib/services/deep-analysis-engine';
+import type { DeepAnalysisResult } from '@/lib/services/deep-analysis-engine';
+
+// The store works with either DeepAnalysis (rich UI format) or DeepAnalysisResult (API format)
+export type DeepAnalysis = DeepAnalysisType & Partial<DeepAnalysisResult>;
 
 // ============================================================
 // TYPES

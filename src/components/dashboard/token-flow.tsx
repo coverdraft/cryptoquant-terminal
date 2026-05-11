@@ -385,8 +385,8 @@ export function TokenFlow() {
 
               return (
                 <tr
-                  key={(token as any)._address || (token as any).id || `${token.symbol}-${token.chain}-${mergedTokens.indexOf(token)}`}
-                  onClick={() => selectToken(token)}
+                  key={(token as any)._address || (token as any).id || `${token.symbol}-${token.chain}-${(mergedTokens as any[]).indexOf(token)}`}
+                  onClick={() => selectToken(token as TokenData)}
                   className={`cursor-pointer transition-colors border-b border-[#1e293b]/50 hover:bg-[#1a1f2e] ${
                     isSelected ? 'bg-[#d4af37]/10 border-l-2 border-l-[#d4af37]' : ''
                   }`}

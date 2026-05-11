@@ -218,6 +218,7 @@ class DecisionEngine {
         chain,
         tokenSymbol: token?.symbol ?? null,
         decisionType,
+        decision: recommendedSystem ? 'BUY' : 'HOLD',
         recommendedSystem,
         reasoning: JSON.stringify(reasoning),
         confidence,
@@ -226,12 +227,8 @@ class DecisionEngine {
         regimeAtDecision: regime,
         smartMoneySignal: JSON.stringify({
           smartMoneyFlowScore: phaseResult.signals.smartMoneyFlowScore,
-        }),
-        whaleSignal: JSON.stringify({
-          holderVelocityScore: phaseResult.signals.holderVelocityScore,
-        }),
-        botActivitySignal: JSON.stringify({
-          botRatioScore: phaseResult.signals.botRatioScore,
+          whaleSignal: { holderVelocityScore: phaseResult.signals.holderVelocityScore },
+          botActivitySignal: { botRatioScore: phaseResult.signals.botRatioScore },
         }),
         operabilityAtDecision: operabilityScore,
         decidedAt: new Date(),
@@ -272,9 +269,9 @@ class DecisionEngine {
 
     return decisions.map((d) => ({
       id: d.id,
-      tokenAddress: d.tokenAddress,
-      chain: d.chain,
-      tokenSymbol: d.tokenSymbol,
+      tokenAddress: d.tokenAddress ?? '',
+      chain: d.chain ?? '',
+      tokenSymbol: d.tokenSymbol ?? '',
       decisionType: d.decisionType as DecisionType,
       recommendedSystem: d.recommendedSystem as RecommendedSystem | null,
       confidence: d.confidence,
@@ -405,16 +402,14 @@ class DecisionEngine {
         outcome: feedback.outcome,
         realizedPnlPct: feedback.realizedPnlPct ?? null,
         realizedPnlUsd: feedback.realizedPnlUsd ?? 0,
-        holdTimeMin: feedback.holdTimeMin ?? null,
-        maxFavorable: feedback.maxFavorable ?? null,
-        maxAdverse: feedback.maxAdverse ?? null,
         decisionWasCorrect,
-        feedbackNotes: JSON.stringify({
+        reasoning: JSON.stringify({
           notes: feedback.notes ?? '',
+          holdTimeMin: feedback.holdTimeMin ?? null,
+          maxFavorable: feedback.maxFavorable ?? null,
+          maxAdverse: feedback.maxAdverse ?? null,
           recordedAt: now.toISOString(),
         }),
-        resolvedAt: now,
-        feedbackAt: now,
       },
     });
   }

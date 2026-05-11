@@ -657,6 +657,14 @@ class CandlestickPatternEngine {
   }
 
   /**
+   * Scan a token across multiple timeframes (alias for scanToken).
+   * The scanToken method already scans across all configured timeframes.
+   */
+  async scanMultiTimeframe(tokenAddress: string, chain: string = 'SOL'): Promise<PatternScanResult> {
+    return this.scanToken(tokenAddress, chain);
+  }
+
+  /**
    * Store pattern scan results in DB for historical analysis.
    */
   async storeScanResults(result: PatternScanResult, cycleRunId?: string): Promise<void> {
@@ -714,5 +722,7 @@ class CandlestickPatternEngine {
     }
   }
 }
+
+export type PatternSentiment = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 
 export const candlestickPatternEngine = new CandlestickPatternEngine();

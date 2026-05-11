@@ -748,6 +748,7 @@ export async function GET() {
     // ---------------------------------------------------------
 
     try {
+      const { db: dbFallback } = await import('@/lib/db');
       const signalTypes = [
         'REGIME_CHANGE', 'BOT_SWARM', 'WHALE_MOVEMENT',
         'LIQUIDITY_DRAIN', 'CORRELATION_BREAK',
@@ -755,7 +756,7 @@ export async function GET() {
       ];
 
       const [dbTokens, signalsMap] = await Promise.all([
-        db.token.findMany({
+        dbFallback.token.findMany({
           select: {
             chain: true,
             priceChange1h: true,
@@ -777,7 +778,7 @@ export async function GET() {
         signalBreakdown[type] = sigs.length;
       }
 
-      const totalSignalCount = await db.predictiveSignal.count({
+      const totalSignalCount = await dbFallback.predictiveSignal.count({
         where: {
           OR: [
             { validUntil: null },

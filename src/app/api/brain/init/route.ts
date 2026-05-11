@@ -436,7 +436,7 @@ async function backgroundInit() {
           };
 
           // === TOP WALLETS ===
-          const topWallets = [];
+          const topWallets: Array<Record<string, unknown>> = [];
           const walletCount = 3 + Math.floor(Math.random() * 5);
           for (let w = 0; w < walletCount; w++) {
             topWallets.push({
@@ -445,7 +445,7 @@ async function backgroundInit() {
               pnl: Math.round((Math.random() * 2 - 0.5) * 100000),
               entryRank: Math.floor(Math.random() * 100) + 1,
               holdTime: Math.floor(Math.random() * 10080) + 10, // minutes
-            });
+            } as any);
           }
 
           await db.tokenDNA.create({

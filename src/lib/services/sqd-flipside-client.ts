@@ -411,14 +411,13 @@ export class HistoricalBackfillEngine {
           volume: dayData.volume,
           trades: dayData.trades,
           source: 'sqd',
-        }));
+        } as const));
 
         if (dailyCandleData.length > 0) {
           try {
             await db.priceCandle.createMany({
               data: dailyCandleData,
-              skipDuplicates: true,
-            });
+            } as any);
             candlesStored += dailyCandleData.length;
           } catch {
             // Fallback to individual upserts for existing records that need updating
@@ -471,14 +470,13 @@ export class HistoricalBackfillEngine {
           chain,
           totalTrades: 1,
           lastActive: new Date(), // Will be updated below with actual timestamps
-        }));
+        } as const));
 
         if (traderData.length > 0) {
           try {
             await db.trader.createMany({
               data: traderData,
-              skipDuplicates: true,
-            });
+            } as any);
           } catch {
             // Fallback to individual upserts for batch failures
             for (const trader of traderData) {
@@ -524,7 +522,7 @@ export class HistoricalBackfillEngine {
             action: 'SWAP',
             tokenAddress,
             valueUsd: 0 as unknown as number, // Will be enriched — Prisma Decimal field
-          });
+          } as const);
         }
 
         // Batch create transactions using createMany with skipDuplicates
@@ -532,8 +530,7 @@ export class HistoricalBackfillEngine {
           try {
             await db.traderTransaction.createMany({
               data: transactionData,
-              skipDuplicates: true,
-            });
+            } as any);
           } catch {
             // Fallback to individual upserts for batch failures
             for (const txn of transactionData) {

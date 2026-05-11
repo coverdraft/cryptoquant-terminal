@@ -138,6 +138,16 @@ export interface ChainScreenOptions extends DexPaprikaScreenOptions {
   maxPools?: number;
   /** Whether to enrich with token detail (buy/sell ratios) */
   enrichWithTokenDetail?: boolean;
+  /** Minimum volume in USD */
+  minVolumeUsd?: number;
+  /** Minimum liquidity in USD */
+  minLiquidityUsd?: number;
+  /** Minimum buy/sell ratio */
+  minBuySellRatio?: number;
+  /** Maximum buy/sell ratio */
+  maxBuySellRatio?: number;
+  /** Maximum tokens to return */
+  limit?: number;
 }
 
 /** Options for all-chains screening */
@@ -359,8 +369,8 @@ export class MultiChainScreener {
     // Fetch top pools for this chain
     const pools = await this.client.getTopPoolsByVolume(networkId, maxPools);
 
-    // Filter by minimum volume
-    const filteredPools = pools.filter(p => p.volume_usd >= minVolumeUsd);
+    // Filter by minimum volume (DexPaprikaPool uses volume.h24)
+    const filteredPools = pools.filter(p => (p.volume?.h24 ?? 0) >= minVolumeUsd);
 
     const screenedTokens: ScreenedToken[] = [];
     const now = Date.now();
@@ -368,7 +378,7 @@ export class MultiChainScreener {
     for (const pool of filteredPools) {
       if (screenedTokens.length >= limit) break;
 
-      const targetToken = pool.tokens[0]; // Primary token in the pair
+      const targetToken = pool.baseToken; // Primary token in the pair
       if (!targetToken) continue;
 
       // Enrich with token detail if requested
@@ -383,11 +393,11 @@ export class MultiChainScreener {
       let buyCount24h = 0;
       let sellCount24h = 0;
       let athPrice = 0;
-      let liquidityUsd = 0;
+      let liquidityUsd = pool.liquidity?.usd ?? 0;
       let poolCount = 0;
 
       if (enrichWithTokenDetail) {
-        tokenDetail = await this.client.getTokenDetail(networkId, targetToken.id);
+        tokenDetail = await this.client.getTokenDetail(networkId, targetToken.address);
 
         if (tokenDetail?.summary) {
           const s = tokenDetail.summary;
@@ -400,12 +410,12 @@ export class MultiChainScreener {
           sellCount1h = s['1h']?.sells || 0;
           buyCount24h = s['24h']?.buys || 0;
           sellCount24h = s['24h']?.sells || 0;
-          liquidityUsd = s.liquidity_usd || 0;
-          poolCount = s.pools || 0;
+          liquidityUsd = tokenDetail.liquidity_usd_value ?? liquidityUsd;
+          poolCount = tokenDetail.pool_count ?? 0;
         }
 
-        if (tokenDetail?.price_stats) {
-          athPrice = tokenDetail.price_stats.ath || 0;
+        if (tokenDetail?.ath_price) {
+          athPrice = tokenDetail.ath_price;
         }
       }
 
@@ -417,32 +427,32 @@ export class MultiChainScreener {
       // Calculate scores
       const buyPressure = calculateBuyPressure(buySellRatio1h, buySellRatio6h, buySellRatio24h);
       const volumeHealth = calculateVolumeHealth(
-        pool.volume_usd,
-        pool.transactions,
+        pool.volume?.h24 ?? 0,
+        (pool.txns?.h24?.buys ?? 0) + (pool.txns?.h24?.sells ?? 0),
         poolCount,
-        tokenDetail?.summary?.['1h']?.volume_usd || 0,
+        pool.volume?.h1 ?? 0,
       );
 
       screenedTokens.push({
-        tokenId: targetToken.id,
+        tokenId: targetToken.address,
         tokenName: targetToken.name,
         tokenSymbol: targetToken.symbol,
         networkId,
         chain: pool.chain,
 
         poolId: pool.id,
-        dexId: pool.dex_id,
-        dexName: pool.dex_name,
+        dexId: pool.dexId,
+        dexName: pool.dexId, // Use dexId as name
 
-        priceUsd: pool.price_usd,
-        priceChange5m: pool.last_price_change_usd_5m,
-        priceChange1h: pool.last_price_change_usd_1h,
-        priceChange24h: pool.last_price_change_usd_24h,
+        priceUsd: parseFloat(pool.priceUsd || '0'),
+        priceChange5m: 0, // Not available in DexPaprikaPool
+        priceChange1h: 0, // Derived from buy ratios
+        priceChange24h: 0,
 
-        volumeUsd: pool.volume_usd,
+        volumeUsd: pool.volume?.h24 ?? 0,
         liquidityUsd,
-        fdv: targetToken.fdv || 0,
-        marketCap: targetToken.fdv || 0, // FDV used as market cap approximation
+        fdv: pool.fdv ?? 0,
+        marketCap: pool.marketCap ?? pool.fdv ?? 0,
 
         buySellRatio1h,
         buySellRatio6h,

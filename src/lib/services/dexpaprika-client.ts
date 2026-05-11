@@ -128,6 +128,45 @@ export interface DexPaprikaTokenScreenParams {
   cursor?: string;
 }
 
+/** Network/chain info from DexPaprika */
+export interface DexPaprikaNetwork {
+  id: string;
+  display_name: string;
+  volume_usd_24h: number;
+  txns_24h: number;
+  pools_count: number;
+}
+
+/** Detailed token info from DexPaprika */
+export interface DexPaprikaTokenDetail {
+  id: string;
+  name: string;
+  symbol: string;
+  chain: string;
+  price_usd: number;
+  volume_usd_24h: number;
+  liquidity_usd: number;
+  market_cap: number;
+  summary?: Record<string, {
+    buys: number;
+    sells: number;
+    buy_usd?: number;
+    sell_usd?: number;
+  }>;
+  ath_price?: number;
+  liquidity_usd_value?: number;
+  pool_count?: number;
+}
+
+/** Screen options for multi-chain screening */
+export interface DexPaprikaScreenOptions {
+  minVolumeUsd?: number;
+  minLiquidityUsd?: number;
+  minBuySellRatio?: number;
+  maxBuySellRatio?: number;
+  limit?: number;
+}
+
 export interface BuySellPressure {
   poolId: string;
   chain: string;
@@ -1359,6 +1398,61 @@ export class DexPaprikaClient {
       pressure24h: 'NEUTRAL', pressure6h: 'NEUTRAL', pressure1h: 'NEUTRAL',
       acceleration: 'STABLE',
     };
+  }
+
+  // ----------------------------------------------------------
+  // MULTI-CHAIN SCREENER STUBS
+  // ----------------------------------------------------------
+
+  /**
+   * Get top pools by volume for a given chain.
+   * Uses DexScreener search since DexPaprika doesn't have a volume-sorted endpoint.
+   */
+  async getTopPoolsByVolume(networkId: string, maxPools: number = 10): Promise<DexPaprikaPool[]> {
+    try {
+      const result = await this.getPools(networkId, maxPools);
+      return result.pools;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get detailed token info.
+   * Uses DexScreener token lookup as a proxy.
+   */
+  async getTokenDetail(networkId: string, tokenId: string): Promise<DexPaprikaTokenDetail | null> {
+    try {
+      const pairs = await this.fetchDexScreenerTokenPairs(tokenId);
+      const pair = pairs[0];
+      if (!pair) return null;
+      return {
+        id: tokenId,
+        name: pair.baseToken.name,
+        symbol: pair.baseToken.symbol,
+        chain: pair.chainId,
+        price_usd: parseFloat(pair.priceUsd || '0'),
+        volume_usd_24h: pair.volume?.h24 ?? 0,
+        liquidity_usd: pair.liquidity?.usd ?? 0,
+        market_cap: pair.marketCap ?? pair.fdv ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get all supported networks/chains.
+   * Returns a static list with basic stats.
+   */
+  async getNetworks(): Promise<DexPaprikaNetwork[]> {
+    return SUPPORTED_CHAINS.map(id => ({
+      id,
+      display_name: id.charAt(0).toUpperCase() + id.slice(1).replace(/_/g, ' '),
+      volume_usd_24h: 0,
+      txns_24h: 0,
+      pools_count: 0,
+    }));
   }
 }
 

@@ -40,7 +40,7 @@ export const birdeyeClient = new BirdeyeClient(
 );
 
 /** Shared DexPaprika client for multi-chain DEX data (FREE, no API key) */
-export const dexPaprikaClient = new DexPaprikaClient(sharedCache);
+export const dexPaprikaClient = new DexPaprikaClient();
 
 /** Shared cache for routes that need it directly */
 export { sharedCache };

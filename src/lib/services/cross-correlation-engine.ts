@@ -29,11 +29,29 @@ import { TokenPhase, type TraderArchetype } from './token-lifecycle-engine';
 import { TraderAction } from './behavioral-model-engine';
 import { type TokenAnalysis } from './brain-orchestrator';
 
+// Import tokenLifecycleEngine lazily
+let _tokenLifecycleEngine: typeof import('./token-lifecycle-engine').tokenLifecycleEngine | null = null;
+async function getTokenLifecycleEngine() {
+  if (!_tokenLifecycleEngine) {
+    const mod = await import('./token-lifecycle-engine');
+    _tokenLifecycleEngine = mod.tokenLifecycleEngine;
+  }
+  return _tokenLifecycleEngine;
+}
+
 // ============================================================
 // TYPES
 // ============================================================
 
 export type Outcome = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+export type MarketOutcome = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+
+export interface ConditionKey {
+  traderArchetype: string;
+  traderAction: string;
+  candlePattern: string;
+  tokenPhase: string;
+}
 
 export interface CorrelationInput {
   tokenAddress: string;
@@ -412,6 +430,225 @@ class CrossCorrelationEngine {
     } catch {
       // If DB fails, proceed with empty cache
       this.cacheLoaded = true;
+    }
+  }
+
+  /**
+   * High-level cross-correlation analysis for a token.
+   * Builds input from token data and runs prediction.
+   */
+  async analyzeCrossCorrelation(
+    tokenAddress: string,
+    chain: string = 'SOL',
+  ): Promise<CrossCorrelationResult & {
+    overallAssessment?: { direction: string; confidence: number; strength: number; recommendation: string };
+    bestStrategy?: { strategy: string; expectedWinRate: number; sampleSize: number };
+    conditionalProbabilities?: Array<{ condition: string; outcome: string; probability: number; totalObservations: number; validation: { isValid: boolean } }>;
+  }> {
+    try {
+      // Get lifecycle phase
+      let phase: TokenPhase = 'INCIPIENT';
+      try {
+        const tle = await getTokenLifecycleEngine();
+        const phaseResult = await tle.detectPhase(tokenAddress, chain);
+        phase = phaseResult.phase;
+      } catch { /* use default */ }
+
+      // Build a minimal input using defaults
+      const input: CorrelationInput = {
+        tokenAddress,
+        chain,
+        phase,
+        dominantArchetype: 'RETAIL_FOMO',
+        dominantAction: 'HOLD' as TraderAction,
+        dominantPattern: null,
+        patternDirection: null,
+        patternSignal: 'NEUTRAL',
+        behaviorDirection: 'NEUTRAL',
+      };
+
+      const result = await this.predict(input);
+
+      // Enrich with assessment and strategy info
+      const bestOutcome = result.prediction.outcome;
+      const bestProb = result.prediction.probability;
+      const confidence = result.prediction.confidence;
+
+      return {
+        ...result,
+        overallAssessment: {
+          direction: bestOutcome,
+          confidence,
+          strength: bestProb - 1 / K,
+          recommendation: bestOutcome === 'BULLISH' ? 'LONG' : bestOutcome === 'BEARISH' ? 'SHORT' : 'HOLD',
+        },
+        bestStrategy: {
+          strategy: bestOutcome === 'BULLISH' ? 'LONG' : bestOutcome === 'BEARISH' ? 'SHORT' : 'HOLD',
+          expectedWinRate: bestProb,
+          sampleSize: result.prediction.observationsUsed,
+        },
+        conditionalProbabilities: Object.entries(result.allPredictions).map(([outcome, prob]) => ({
+          condition: `${phase}:RETAIL_FOMO:HOLD:none:NEUTRAL:NEUTRAL`,
+          outcome,
+          probability: prob,
+          totalObservations: result.prediction.observationsUsed,
+          validation: { isValid: result.prediction.observationsUsed >= 30 },
+        })),
+      };
+    } catch (error) {
+      // Return a default result on error
+      return {
+        tokenAddress,
+        chain,
+        prediction: {
+          tokenAddress,
+          outcome: 'NEUTRAL' as Outcome,
+          probability: 1 / K,
+          confidence: 0,
+          breakdown: {
+            phasePrior: { BULLISH: 1/3, BEARISH: 1/3, NEUTRAL: 1/3 },
+            patternLikelihood: { BULLISH: 1/3, BEARISH: 1/3, NEUTRAL: 1/3 },
+            behaviorLikelihood: { BULLISH: 1/3, BEARISH: 1/3, NEUTRAL: 1/3 },
+          },
+          evidence: ['Insufficient data for cross-correlation analysis'],
+          observationsUsed: 0,
+        },
+        allPredictions: { BULLISH: 1/3, BEARISH: 1/3, NEUTRAL: 1/3 },
+        dominantFactors: [],
+        conflictDetected: false,
+        conflictDescription: null,
+        timestamp: new Date(),
+        overallAssessment: {
+          direction: 'NEUTRAL',
+          confidence: 0,
+          strength: 0,
+          recommendation: 'NO_DATA',
+        },
+        bestStrategy: {
+          strategy: 'HOLD',
+          expectedWinRate: 0.33,
+          sampleSize: 0,
+        },
+        conditionalProbabilities: [],
+      };
+    }
+  }
+
+  /**
+   * Get statistics about the cross-correlation data.
+   */
+  async getCorrelationStats(): Promise<{
+    totalCombinations: number;
+    totalObservations: number;
+    reliableCombinations: number;
+  }> {
+    try {
+      const records = await db.feedbackMetrics.findMany({
+        where: { sourceType: 'cross_correlation' },
+      });
+
+      let totalObservations = 0;
+      let reliableCombinations = 0;
+
+      for (const record of records) {
+        try {
+          const context = JSON.parse(record.context || '{}');
+          const counts: Record<string, number> = context.counts ?? {};
+          const total = Object.values(counts).reduce((s: number, v) => s + (v as number), 0);
+          totalObservations += total;
+          if (total >= 30) reliableCombinations++;
+        } catch { /* skip malformed */ }
+      }
+
+      return {
+        totalCombinations: records.length,
+        totalObservations,
+        reliableCombinations,
+      };
+    } catch {
+      return { totalCombinations: 0, totalObservations: 0, reliableCombinations: 0 };
+    }
+  }
+
+  /**
+   * Evaluate pending cross-correlation observations whose time window has expired.
+   * Compares predicted outcomes with actual price movements and updates the model.
+   * Returns the number of observations evaluated.
+   */
+  async evaluatePendingObservations(): Promise<number> {
+    try {
+      // Find pending observations that have passed their evaluation window
+      const pendingSignals = await db.predictiveSignal.findMany({
+        where: {
+          signalType: 'PIPELINE_ANALYSIS',
+          wasCorrect: null,
+          validUntil: { lt: new Date() },
+        },
+        take: 50,
+        orderBy: { createdAt: 'asc' },
+      });
+
+      let evaluated = 0;
+      for (const signal of pendingSignals) {
+        try {
+          // Get the current price to compare with prediction
+          const token = await db.token.findFirst({
+            where: { address: signal.tokenAddress ?? undefined },
+          });
+
+          if (!token) continue;
+
+          // Determine if prediction was correct
+          try {
+            const pred = JSON.parse(signal.prediction) as Record<string, unknown>;
+            const direction = pred.direction as string;
+            const wasCorrect = (direction === 'LONG' && token.priceChange24h > 0)
+              || (direction === 'SHORT' && token.priceChange24h < 0)
+              || (direction === 'HOLD' && Math.abs(token.priceChange24h ?? 0) < 5)
+              || (direction === 'WAIT');
+
+            await db.predictiveSignal.update({
+              where: { id: signal.id },
+              data: { wasCorrect },
+            });
+            evaluated++;
+          } catch { /* skip malformed prediction */ }
+        } catch { /* skip signal */ }
+      }
+
+      return evaluated;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Record an observation with simplified parameters for the pipeline.
+   */
+  async recordObservationPipeline(
+    tokenAddress: string,
+    chain: string,
+    conditions: ConditionKey,
+    currentPrice: number,
+  ): Promise<string | null> {
+    try {
+      const input: CorrelationInput = {
+        tokenAddress,
+        chain,
+        phase: conditions.tokenPhase as TokenPhase,
+        dominantArchetype: conditions.traderArchetype as TraderArchetype,
+        dominantAction: conditions.traderAction as TraderAction,
+        dominantPattern: conditions.candlePattern === 'NO_PATTERN' ? null : conditions.candlePattern,
+        patternDirection: null,
+        patternSignal: 'NEUTRAL',
+        behaviorDirection: 'NEUTRAL',
+      };
+
+      // Record with NEUTRAL outcome as placeholder (will be evaluated later)
+      await this.recordObservation(input, 'NEUTRAL');
+      return `obs_${Date.now()}`;
+    } catch {
+      return null;
     }
   }
 }

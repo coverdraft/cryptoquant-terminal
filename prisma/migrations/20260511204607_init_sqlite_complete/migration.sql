@@ -634,6 +634,107 @@ CREATE TABLE "capital_states" (
     "updatedAtCycle" INTEGER NOT NULL DEFAULT 0
 );
 
+-- CreateTable
+CREATE TABLE "extraction_jobs" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "type" TEXT NOT NULL,
+    "jobType" TEXT NOT NULL DEFAULT 'FULL',
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "chain" TEXT NOT NULL DEFAULT 'SOL',
+    "startedAt" DATETIME,
+    "completedAt" DATETIME,
+    "error" TEXT,
+    "recordsProcessed" INTEGER NOT NULL DEFAULT 0,
+    "tokensDiscovered" INTEGER NOT NULL DEFAULT 0,
+    "candlesStored" INTEGER NOT NULL DEFAULT 0,
+    "walletsProfiled" INTEGER NOT NULL DEFAULT 0,
+    "transactionsStored" INTEGER NOT NULL DEFAULT 0,
+    "signalsGenerated" INTEGER NOT NULL DEFAULT 0,
+    "protocolsStored" INTEGER NOT NULL DEFAULT 0,
+    "sourcesUsed" TEXT NOT NULL DEFAULT '[]',
+    "durationMs" INTEGER NOT NULL DEFAULT 0,
+    "errors" TEXT NOT NULL DEFAULT '[]',
+    "config" TEXT NOT NULL DEFAULT '{}',
+    "metadata" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "data_retention_policies" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "dataType" TEXT NOT NULL,
+    "tableName" TEXT NOT NULL DEFAULT '',
+    "retentionDays" INTEGER NOT NULL DEFAULT 30,
+    "hotDays" INTEGER NOT NULL DEFAULT 7,
+    "warmDays" INTEGER NOT NULL DEFAULT 30,
+    "coldDays" INTEGER NOT NULL DEFAULT 90,
+    "archiveMethod" TEXT NOT NULL DEFAULT 'DELETE',
+    "compressionEnabled" BOOLEAN NOT NULL DEFAULT true,
+    "aggregationInterval" TEXT,
+    "lastCleanupAt" DATETIME,
+    "lastArchivedAt" DATETIME,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "lastArchiveStats" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "api_rate_limits" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "service" TEXT NOT NULL,
+    "maxRequests" INTEGER NOT NULL DEFAULT 300,
+    "windowMs" INTEGER NOT NULL DEFAULT 60000,
+    "currentCount" INTEGER NOT NULL DEFAULT 0,
+    "windowStart" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "decision_logs" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "systemId" TEXT,
+    "tokenAddress" TEXT,
+    "chain" TEXT,
+    "tokenSymbol" TEXT,
+    "decisionType" TEXT NOT NULL DEFAULT 'SYSTEM_MATCH',
+    "decision" TEXT NOT NULL,
+    "recommendedSystem" TEXT,
+    "confidence" REAL NOT NULL DEFAULT 0,
+    "dataQualityScore" REAL NOT NULL DEFAULT 0,
+    "reasoning" TEXT NOT NULL DEFAULT '{}',
+    "outcome" TEXT,
+    "pnlPct" REAL,
+    "tokenPhaseAtDecision" TEXT,
+    "regimeAtDecision" TEXT,
+    "operabilityAtDecision" REAL,
+    "wasActedUpon" BOOLEAN NOT NULL DEFAULT false,
+    "realizedPnlPct" REAL,
+    "decisionWasCorrect" BOOLEAN,
+    "realizedPnlUsd" REAL,
+    "smartMoneySignal" TEXT,
+    "decidedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateTable
+CREATE TABLE "protocol_data" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "protocol" TEXT NOT NULL,
+    "chain" TEXT NOT NULL DEFAULT 'SOL',
+    "slug" TEXT NOT NULL DEFAULT '',
+    "slug_chain" TEXT,
+    "tvl" REAL NOT NULL DEFAULT 0,
+    "tvlUsd" REAL NOT NULL DEFAULT 0,
+    "volume24h" REAL NOT NULL DEFAULT 0,
+    "fees24h" REAL NOT NULL DEFAULT 0,
+    "metadata" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Token_address_key" ON "Token"("address");
 
@@ -714,3 +815,12 @@ CREATE INDEX "operability_scores_isOperable_score_idx" ON "operability_scores"("
 
 -- CreateIndex
 CREATE INDEX "trading_cycles_status_startedAt_idx" ON "trading_cycles"("status", "startedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "data_retention_policies_dataType_key" ON "data_retention_policies"("dataType");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "api_rate_limits_service_key" ON "api_rate_limits"("service");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "protocol_data_slug_chain_key" ON "protocol_data"("slug_chain");

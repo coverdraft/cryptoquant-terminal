@@ -29,8 +29,111 @@ import { TokenPhase } from './token-lifecycle-engine';
 // ============================================================
 
 export type AnalysisDepth = 'QUICK' | 'STANDARD' | 'DEEP';
-export type RiskLevel = 'VERY_LOW' | 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH';
-export type ActionRecommendation = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'REDUCE' | 'SELL' | 'AVOID';
+export type ThinkingDepth = AnalysisDepth; // Alias used by pipeline and UI
+export type RiskLevel = 'VERY_LOW' | 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH' | 'EXTREME';
+export type ActionRecommendation = 'STRONG_BUY' | 'BUY' | 'HOLD' | 'REDUCE' | 'SELL' | 'AVOID' | 'STRONG_SELL' | 'WAIT';
+
+/** Extended input type used by the brain-analysis-pipeline */
+export interface AnalysisInput {
+  tokenAddress: string;
+  symbol: string;
+  chain: string;
+  currentPrice: number;
+  priceChange24h: number;
+  regime: string;
+  regimeConfidence: number;
+  lifecyclePhase: string;
+  lifecycleConfidence: number;
+  netBehaviorFlow: string;
+  botSwarmLevel: string;
+  whaleDirection: string;
+  operabilityScore: number;
+  patternScan?: PatternScanResult;
+  crossCorrelation?: Record<string, unknown>;
+  dataReliability: {
+    sampleSufficiency: string;
+    totalCorrelationSamples: number;
+    reliableCombinations: number;
+  };
+  candles1h: number;
+  candles5m: number;
+  tradersAnalyzed: number;
+  signalsGenerated: number;
+}
+
+/** Rich deep analysis type used by the UI (deep-analysis-panel) */
+export interface DeepAnalysis {
+  tokenAddress: string;
+  symbol: string;
+  chain: string;
+  depth: ThinkingDepth;
+  analyzedAt: Date;
+
+  // Phase assessment
+  phaseAssessment: {
+    phase: string;
+    confidence: number;
+    timeInPhase: string;
+    narrative: string;
+  };
+
+  // Pattern assessment
+  patternAssessment: {
+    dominantPattern: string | null;
+    patternSentiment: string;
+    multiTfConfirmed: boolean;
+    narrative: string;
+  };
+
+  // Trader assessment
+  traderAssessment: {
+    dominantArchetype: string;
+    behaviorFlow: string;
+    riskFromBots: string;
+    riskFromWhales: string;
+    narrative: string;
+  };
+
+  // Verdict
+  verdict: {
+    action: string;
+    confidence: number;
+    reasoning: string;
+    summary?: string;
+    criticalNote?: string;
+  };
+
+  // Risk assessment
+  riskAssessment: {
+    overallRisk: string;
+    keyRisks: string[];
+    mitigatingFactors: string[];
+    blackSwanRisk: string;
+  };
+
+  // Strategy recommendation
+  strategyRecommendation: {
+    strategy: string;
+    direction: string;
+    confidenceLevel: number;
+    positionSizeRecommendation: string;
+    stopLossRecommendation: string;
+    takeProfitRecommendation: string;
+    entryConditions: string[];
+    exitConditions: string[];
+  };
+
+  // Evidence matrix
+  pros: Array<{ factor: string; weight: number; explanation: string }>;
+  cons: Array<{ factor: string; weight: number; explanation: string }>;
+  neutrals: Array<{ factor: string; weight: number; explanation: string }>;
+
+  // Reasoning
+  reasoningChain: string[];
+
+  // Timestamp (from DeepAnalysisResult)
+  timestamp?: Date;
+}
 
 export interface DeepAnalysisResult {
   tokenAddress: string;
@@ -493,13 +596,52 @@ class DeepAnalysisEngine {
    * Run deep analysis on a token.
    * Tries LLM first, falls back to rule-based, or merges both.
    */
-  async analyze(input: DeepAnalysisInput): Promise<DeepAnalysisResult> {
+  async analyze(input: DeepAnalysisInput | AnalysisInput, thinkingDepth?: ThinkingDepth): Promise<DeepAnalysisResult> {
+    // Convert AnalysisInput to DeepAnalysisInput if needed
+    let analysisInput: DeepAnalysisInput;
+    if ('currentPrice' in input) {
+      // It's an AnalysisInput - convert to DeepAnalysisInput
+      const ai = input as AnalysisInput;
+      analysisInput = {
+        tokenAddress: ai.tokenAddress,
+        symbol: ai.symbol,
+        chain: ai.chain,
+        brainAnalysis: {
+          tokenAddress: ai.tokenAddress,
+          chain: ai.chain,
+          lifecyclePhase: ai.lifecyclePhase,
+          lifecycleConfidence: ai.lifecycleConfidence,
+          regime: ai.regime as 'BULL' | 'BEAR' | 'SIDEWAYS' | 'TRANSITION',
+          regimeConfidence: ai.regimeConfidence,
+          volatilityRegime: 'NORMAL',
+          operabilityLevel: ai.operabilityScore >= 60 ? 'PREMIUM' : ai.operabilityScore >= 40 ? 'GOOD' : ai.operabilityScore >= 20 ? 'RISKY' : 'UNOPERABLE',
+          operabilityScore: ai.operabilityScore,
+          isOperable: ai.operabilityScore >= 20,
+          botSwarmLevel: ai.botSwarmLevel as 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+          whaleDirection: ai.whaleDirection as 'ACCUMULATING' | 'DISTRIBUTING' | 'NEUTRAL' | 'ROTATING',
+          whaleConfidence: 0.5,
+          smartMoneyFlow: ai.netBehaviorFlow as 'INFLOW' | 'OUTFLOW' | 'NEUTRAL',
+          meanReversionZone: null,
+          anomalyDetected: false,
+          anomalyScore: 0,
+          isTransitioning: false,
+          warnings: [],
+          evidence: [],
+        } as any,
+        patternScan: ai.patternScan,
+        depth: thinkingDepth ?? ai.dataReliability?.sampleSufficiency === 'OPTIMAL' ? 'DEEP' : 'STANDARD',
+      };
+    } else {
+      analysisInput = input as DeepAnalysisInput;
+      if (thinkingDepth) analysisInput.depth = thinkingDepth;
+    }
+
     // Always compute rule-based as baseline
-    const ruleResult = ruleBasedAnalysis(input);
+    const ruleResult = ruleBasedAnalysis(analysisInput);
 
     // Try LLM for depth >= STANDARD
-    if ((input.depth ?? 'STANDARD') !== 'QUICK') {
-      const llmResult = await llmAnalysis(input);
+    if ((analysisInput.depth ?? 'STANDARD') !== 'QUICK') {
+      const llmResult = await llmAnalysis(analysisInput);
       if (llmResult) {
         // Hybrid: merge both
         return mergeAnalyses(llmResult, ruleResult);

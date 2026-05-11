@@ -548,7 +548,7 @@ export async function runBrainCycle(
     // STEP 4b: PATTERN SIGNALS (from PatternRule table)
     if (fullConfig.enablePatterns && tokens.length > 0) {
       try {
-        const patternResult = await generatePatternSignals(tokens);
+        const patternResult = await generatePatternSignals(tokens as any[]);
         signalBreakdown.patterns = patternResult.count;
       } catch (e) {
         console.error('[Pipeline] Pattern signal generation failed:', e);

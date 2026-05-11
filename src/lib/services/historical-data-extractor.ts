@@ -339,8 +339,8 @@ export class HistoricalDataExtractor {
       const currentPrice = parseFloat(pairData.priceUsd || '0');
       if (currentPrice <= 0) return 0;
 
-      const priceChange = pairData.priceChange || {};
-      const volume = pairData.volume || {};
+      const priceChange = pairData.priceChange as Record<string, number> || {};
+      const volume = pairData.volume as Record<string, number> || {};
       const vol24h = volume.h24 || 0;
       const vol1h = volume.h1 || 0;
 

@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
     }
     
     if (mode === 'correlation') {
-      const correlation = await crossCorrelationEngine.computeCrossCorrelation(tokenAddress, chain);
+      const correlation = await crossCorrelationEngine.analyzeCrossCorrelation(tokenAddress, chain);
       return NextResponse.json({ data: correlation, error: null });
     }
     
@@ -95,11 +95,29 @@ export async function GET(request: NextRequest) {
         tokenAddress,
         symbol: token?.symbol || '',
         chain,
-        priceUsd: token?.priceUsd || 0,
-        priceChange24h: token?.priceChange24h || 0,
-        volume24h: token?.volume24h || 0,
-        marketCap: token?.marketCap || 0,
-        liquidity: token?.liquidity || 0,
+        brainAnalysis: {
+          tokenAddress,
+          chain,
+          lifecyclePhase: 'INCIPIENT',
+          lifecycleConfidence: 0.5,
+          regime: 'SIDEWAYS',
+          regimeConfidence: 0.5,
+          volatilityRegime: 'NORMAL',
+          operabilityLevel: 'GOOD',
+          operabilityScore: 50,
+          isOperable: true,
+          botSwarmLevel: 'NONE',
+          whaleDirection: 'NEUTRAL',
+          whaleConfidence: 0.5,
+          smartMoneyFlow: 'NEUTRAL',
+          meanReversionZone: null,
+          anomalyDetected: false,
+          anomalyScore: 0,
+          isTransitioning: false,
+          warnings: [],
+          evidence: [],
+        } as any,
+        depth: 'STANDARD',
       });
       return NextResponse.json({ data: deepResult, error: null });
     }

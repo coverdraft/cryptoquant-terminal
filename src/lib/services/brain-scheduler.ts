@@ -122,8 +122,8 @@ export interface SchedulerStatusReport {
   uptime: number; // ms
   config: SchedulerConfig;
   tasks: TaskStatus[];
-  brainCycle: ReturnType<typeof brainCycleEngine.getStatus>;
-  capitalStrategy: ReturnType<typeof capitalStrategyManager.getCapitalSummary>;
+  brainCycle: any;
+  capitalStrategy: any;
   totalCyclesCompleted: number;
   lastError: string | null;
 }

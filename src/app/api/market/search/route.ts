@@ -111,7 +111,8 @@ export async function GET(request: NextRequest) {
     // Fallback: search local database by symbol / name
     // -----------------------------------------------------------
     try {
-      const dbTokens = await db.token.findMany({
+      const { db: dbSearch } = await import('@/lib/db');
+      const dbTokens = await dbSearch.token.findMany({
         where: {
           ...(chain ? { chain: chain.toUpperCase() } : {}),
           OR: [

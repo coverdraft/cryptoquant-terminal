@@ -2147,31 +2147,34 @@ class ProtocolAnalyzer {
         try {
           await db.protocolData.upsert({
             where: {
-              slug_chain: { slug: protocol.id, chain: protocol.chain || 'unknown' },
+              slug_chain: `${protocol.id}_${protocol.chain || 'unknown'}`,
             },
             create: {
               slug: protocol.id,
-              name: protocol.name,
               chain: protocol.chain || 'unknown',
-              category: protocol.category || null,
+              protocol: protocol.name || protocol.id,
               tvlUsd: protocol.tvl,
-              tvlChange1d: protocol.tvlChange1d,
-              tvlChange7d: protocol.tvlChange7d,
-              mcap: protocol.mcap,
-              fdv: protocol.fdv,
-              url: protocol.url,
-              logo: protocol.logo,
-              description: protocol.description,
-              chains: JSON.stringify(protocol.chains),
-              dataFetchedAt: new Date(),
+              metadata: JSON.stringify({
+                category: protocol.category,
+                name: protocol.name,
+                tvlChange1d: protocol.tvlChange1d,
+                tvlChange7d: protocol.tvlChange7d,
+                mcap: protocol.mcap,
+                fdv: protocol.fdv,
+                url: protocol.url,
+                logo: protocol.logo,
+                description: protocol.description,
+                chains: protocol.chains,
+              }),
             },
             update: {
               tvlUsd: protocol.tvl,
-              tvlChange1d: protocol.tvlChange1d,
-              tvlChange7d: protocol.tvlChange7d,
-              mcap: protocol.mcap,
-              fdv: protocol.fdv,
-              dataFetchedAt: new Date(),
+              metadata: JSON.stringify({
+                tvlChange1d: protocol.tvlChange1d,
+                tvlChange7d: protocol.tvlChange7d,
+                mcap: protocol.mcap,
+                fdv: protocol.fdv,
+              }),
             },
           });
         } catch (error) {
@@ -2251,6 +2254,7 @@ class ExtractionScheduler {
   ): Promise<string> {
     const job = await db.extractionJob.create({
       data: {
+        type: jobType,
         jobType,
         status: 'PENDING',
         sourcesUsed: JSON.stringify(sources),

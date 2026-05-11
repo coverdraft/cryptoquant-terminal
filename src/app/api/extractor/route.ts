@@ -58,7 +58,7 @@ export async function GET() {
         startedAt: j.startedAt,
         completedAt: j.completedAt,
         durationMs: j.durationMs,
-        errors: JSON.parse(j.errors || '[]'),
+        errors: JSON.parse(j.error || '[]'),
         createdAt: j.createdAt,
       })),
     });

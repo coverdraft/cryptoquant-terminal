@@ -17,12 +17,12 @@ export async function POST(request: NextRequest) {
       // No JSON body provided, use defaults
     }
     const config: Partial<import('@/lib/services/brain-pipeline').PipelineConfig> = {
-      ...(body.capitalUsd !== undefined && { capitalUsd: body.capitalUsd }),
-      ...(body.chain !== undefined && { chain: body.chain }),
-      ...(body.scanLimit !== undefined && { scanLimit: body.scanLimit }),
-      ...(body.minOperabilityScore !== undefined && { minOperabilityScore: body.minOperabilityScore }),
-      ...(body.cycleIntervalMs !== undefined && { cycleIntervalMs: body.cycleIntervalMs }),
-      ...(body.maxAllocationPctPerToken !== undefined && { maxAllocationPctPerToken: body.maxAllocationPctPerToken }),
+      ...(body.capitalUsd !== undefined && { capitalUsd: Number(body.capitalUsd) }),
+      ...(body.chain !== undefined && { chain: String(body.chain) }),
+      ...(body.scanLimit !== undefined && { scanLimit: Number(body.scanLimit) }),
+      ...(body.minOperabilityScore !== undefined && { minOperabilityScore: Number(body.minOperabilityScore) }),
+      ...(body.cycleIntervalMs !== undefined && { cycleIntervalMs: Number(body.cycleIntervalMs) }),
+      ...(body.maxAllocationPctPerToken !== undefined && { maxAllocationPctPerToken: Number(body.maxAllocationPctPerToken) }),
     };
 
     const result = await runBrainCycle(config);

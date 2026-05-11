@@ -516,7 +516,7 @@ function generateSignalFromEngine(
         const total = avgPriceHistory.length || 1;
         const posRatio = positive / total;
         const regime = posRatio > 0.6 ? 'BULL' : posRatio < 0.4 ? 'BEAR' : 'SIDEWAYS';
-        const cyclePhase = regime === 'BULL' ? 'EXPANSION' : regime === 'BEAR' ? 'CONTRACTION' : regime === 'TRANSITION' ? 'TURNING_POINT' : 'CONSOLIDATION';
+        const cyclePhase = regime === 'BULL' ? 'EXPANSION' : regime === 'BEAR' ? 'CONTRACTION' : 'CONSOLIDATION';
         return {
           prediction: { cyclePhase, regime, trendStrength: Math.abs(posRatio - 0.5) * 2, momentum: posRatio - 0.5, position: posRatio > 0.5 ? 'EARLY' : 'LATE' },
           confidence: Math.min(0.9, 0.4 + Math.abs(posRatio - 0.5)),

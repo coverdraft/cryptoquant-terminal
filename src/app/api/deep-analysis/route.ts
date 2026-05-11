@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { ThinkingDepth } from '@/lib/services/deep-analysis-engine';
+import type { ThinkingDepth, DeepAnalysisResult } from '@/lib/services/deep-analysis-engine';
 import { db } from '@/lib/db';
 
 export async function POST(request: NextRequest) {

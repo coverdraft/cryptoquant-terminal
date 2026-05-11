@@ -922,3 +922,118 @@ model CapitalState {
 
   @@map("capital_states")
 }
+
+// ============================================================
+// EXTRACTION & DATA JOBS
+// ============================================================
+
+model ExtractionJob {
+  id                String   @id @default(cuid())
+  type              String   // COINGECKO, DEXSCREENER, SQD, etc.
+  jobType           String   @default("FULL") // FULL, INCREMENTAL, BACKFILL
+  status            String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  chain             String   @default("SOL")
+  startedAt         DateTime?
+  completedAt       DateTime?
+  error             String?
+  recordsProcessed  Int      @default(0)
+  tokensDiscovered  Int      @default(0)
+  candlesStored     Int      @default(0)
+  walletsProfiled   Int      @default(0)
+  transactionsStored Int     @default(0)
+  signalsGenerated  Int      @default(0)
+  protocolsStored   Int      @default(0)
+  sourcesUsed       String   @default("[]") // JSON array
+  durationMs        Int      @default(0)
+  errors            String   @default("[]") // JSON array
+  config            String   @default("{}") // JSON
+  metadata          String   @default("{}") // JSON
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("extraction_jobs")
+}
+
+model DataRetentionPolicy {
+  id                   String   @id @default(cuid())
+  dataType             String   @unique // SIGNALS, CANDLES, TRANSACTIONS, etc.
+  tableName            String   @default("") // DB table name
+  retentionDays        Int      @default(30)
+  hotDays              Int      @default(7)
+  warmDays             Int      @default(30)
+  coldDays             Int      @default(90)
+  archiveMethod        String   @default("DELETE") // DELETE, AGGREGATE, COMPRESS
+  compressionEnabled   Boolean  @default(true)
+  aggregationInterval  String?  // 1h, 1d, etc.
+  lastCleanupAt        DateTime?
+  lastArchivedAt       DateTime?
+  isActive             Boolean  @default(true)
+  lastArchiveStats     String   @default("{}") // JSON
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("data_retention_policies")
+}
+
+model ApiRateLimit {
+  id           String   @id @default(cuid())
+  service      String   @unique // COINGECKO, DEXSCREENER, etc.
+  maxRequests  Int      @default(300)
+  windowMs     Int      @default(60000)
+  currentCount Int      @default(0)
+  windowStart  DateTime @default(now())
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("api_rate_limits")
+}
+
+model DecisionLog {
+  id                     String   @id @default(cuid())
+  systemId               String?
+  tokenAddress           String?
+  chain                  String?
+  tokenSymbol            String?
+  decisionType           String   @default("SYSTEM_MATCH") // SYSTEM_MATCH, MANUAL, AUTO
+  decision               String   // BUY, SELL, HOLD, WAIT
+  recommendedSystem      String?  // System name
+  confidence             Float    @default(0)
+  dataQualityScore       Float    @default(0)
+  reasoning              String   @default("{}") // JSON
+  outcome                String?  // PROFIT, LOSS, NEUTRAL
+  pnlPct                 Float?
+  tokenPhaseAtDecision   String?
+  regimeAtDecision       String?
+  operabilityAtDecision  Float?
+  wasActedUpon           Boolean  @default(false)
+  realizedPnlPct         Float?
+  decisionWasCorrect     Boolean?
+  realizedPnlUsd         Float?
+  smartMoneySignal       String?
+  decidedAt              DateTime @default(now())
+
+  createdAt              DateTime @default(now())
+
+  @@map("decision_logs")
+}
+
+model ProtocolData {
+  id          String   @id @default(cuid())
+  protocol          String
+  chain             String   @default("SOL")
+  slug              String   @default("")
+  slug_chain        String?  @unique
+  tvl               Float    @default(0)
+  tvlUsd            Float    @default(0)
+  volume24h         Float    @default(0)
+  fees24h           Float    @default(0)
+  metadata          String   @default("{}") // JSON
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("protocol_data")
+}

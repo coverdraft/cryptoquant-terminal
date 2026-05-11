@@ -2,6 +2,7 @@
 
 import { useDeepAnalysisStore } from '@/store/deep-analysis-store';
 import type { DeepAnalysis, ThinkingDepth } from '@/lib/services/deep-analysis-engine';
+import type { DeepAnalysisResult } from '@/lib/services/deep-analysis-engine';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -51,8 +52,9 @@ import {
   Route,
 } from 'lucide-react';
 
-// ============================================================
-// CONSTANTS & HELPERS
+export type AnalysisData = DeepAnalysis & Partial<DeepAnalysisResult> & { timestamp?: Date };
+
+// Add missing properties to DeepAnalysis verdict type
 // ============================================================
 
 const VERDICT_CONFIG: Record<string, { color: string; bg: string; border: string; icon: React.ElementType }> = {
@@ -353,7 +355,7 @@ function AnalysisInputForm() {
 // ANALYSIS HEADER
 // ============================================================
 
-function AnalysisHeader({ analysis }: { analysis: DeepAnalysis }) {
+function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
   const vCfg = VERDICT_CONFIG[analysis.verdict.action] || VERDICT_CONFIG.HOLD;
   const pCfg = PHASE_COLORS[analysis.phaseAssessment.phase] || PHASE_COLORS.LEGACY;
   const depthCfg = DEPTH_CONFIG[analysis.depth];
@@ -407,7 +409,7 @@ function AnalysisHeader({ analysis }: { analysis: DeepAnalysis }) {
 // PHASE ASSESSMENT CARD
 // ============================================================
 
-function PhaseAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function PhaseAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const pCfg = PHASE_COLORS[analysis.phaseAssessment.phase] || PHASE_COLORS.LEGACY;
 
   return (
@@ -444,7 +446,7 @@ function PhaseAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; inde
 // PATTERN ASSESSMENT CARD
 // ============================================================
 
-function PatternAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const sentimentColor =
     analysis.patternAssessment.patternSentiment === 'BULLISH' ? 'text-emerald-400' :
     analysis.patternAssessment.patternSentiment === 'BEARISH' ? 'text-red-400' :
@@ -512,7 +514,7 @@ function PatternAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; in
 // TRADER ASSESSMENT CARD
 // ============================================================
 
-function TraderAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function TraderAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const flowColor =
     analysis.traderAssessment.behaviorFlow === 'BULLISH' ? 'text-emerald-400' :
     analysis.traderAssessment.behaviorFlow === 'BEARISH' ? 'text-red-400' :
@@ -586,7 +588,7 @@ function TraderAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; ind
 // EVIDENCE MATRIX
 // ============================================================
 
-function EvidenceMatrixCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function EvidenceMatrixCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const totalWeight = (items: Array<{ weight: number }>) =>
     items.reduce((s, i) => s + i.weight, 0);
 
@@ -693,7 +695,7 @@ function EvidenceMatrixCard({ analysis, index }: { analysis: DeepAnalysis; index
 // STRATEGY RECOMMENDATION CARD
 // ============================================================
 
-function StrategyRecommendationCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function StrategyRecommendationCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const strat = analysis.strategyRecommendation;
   const dirCfg = DIRECTION_CONFIG[strat.direction] || DIRECTION_CONFIG.HOLD;
   const DirIcon = dirCfg.icon;
@@ -801,7 +803,7 @@ function StrategyRecommendationCard({ analysis, index }: { analysis: DeepAnalysi
 // RISK ASSESSMENT CARD
 // ============================================================
 
-function RiskAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; index: number }) {
+function RiskAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
   const risk = analysis.riskAssessment;
   const rCfg = RISK_CONFIG[risk.overallRisk] || RISK_CONFIG.MEDIUM;
   const RiskIcon = rCfg.icon;
@@ -883,7 +885,7 @@ function RiskAssessmentCard({ analysis, index }: { analysis: DeepAnalysis; index
 // REASONING CHAIN (Collapsible)
 // ============================================================
 
-function ReasoningChainCard({ analysis }: { analysis: DeepAnalysis }) {
+function ReasoningChainCard({ analysis }: { analysis: AnalysisData }) {
   const { showReasoningChain, toggleReasoningChain } = useDeepAnalysisStore();
 
   return (
@@ -973,7 +975,7 @@ function ReasoningChainCard({ analysis }: { analysis: DeepAnalysis }) {
 // VERDICT SUMMARY
 // ============================================================
 
-function VerdictSummaryCard({ analysis }: { analysis: DeepAnalysis }) {
+function VerdictSummaryCard({ analysis }: { analysis: AnalysisData }) {
   const vCfg = VERDICT_CONFIG[analysis.verdict.action] || VERDICT_CONFIG.HOLD;
   const VerdictIcon = vCfg.icon;
 
@@ -998,8 +1000,8 @@ function VerdictSummaryCard({ analysis }: { analysis: DeepAnalysis }) {
                   ({formatConfidence(analysis.verdict.confidence)} confidence)
                 </span>
               </div>
-              <p className="text-[11px] text-[#94a3b8] leading-relaxed">{analysis.verdict.summary}</p>
-              {analysis.verdict.criticalNote && (
+              <p className="text-[11px] text-[#94a3b8] leading-relaxed">{analysis.verdict?.summary || analysis.verdict?.reasoning || ''}</p>
+              {analysis.verdict?.criticalNote && (
                 <div className="mt-2 flex items-start gap-1.5 bg-red-500/10 border border-red-500/20 rounded-md p-2">
                   <AlertTriangle className="h-3 w-3 text-red-400 shrink-0 mt-0.5" />
                   <span className="text-[10px] text-red-300 leading-relaxed">{analysis.verdict.criticalNote}</span>
@@ -1117,7 +1119,7 @@ export function DeepAnalysisPanel() {
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="h-3 w-3 text-emerald-400" />
               <span className="font-mono text-[9px] text-emerald-400">
-                {new Date(analysis.timestamp).toLocaleTimeString()}
+                {new Date(analysis.timestamp || analysis.analyzedAt || Date.now()).toLocaleTimeString()}
               </span>
             </div>
           )}

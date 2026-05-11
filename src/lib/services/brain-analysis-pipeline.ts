@@ -34,7 +34,7 @@ import { db } from '../db';
 import { candlestickPatternEngine, type PatternScanResult } from './candlestick-pattern-engine';
 import { crossCorrelationEngine, type CrossCorrelationResult, type ConditionKey } from './cross-correlation-engine';
 import { behavioralModelEngine, type BehavioralPrediction } from './behavioral-model-engine';
-import { deepAnalysisEngine, type DeepAnalysis, type AnalysisInput, type ThinkingDepth } from './deep-analysis-engine';
+import { deepAnalysisEngine, type DeepAnalysis, type DeepAnalysisResult, type AnalysisInput, type ThinkingDepth } from './deep-analysis-engine';
 import { patternCompressionPipeline, type CompressionResult } from './pattern-compression-pipeline';
 import { tokenLifecycleEngine, type TokenPhase, type TraderArchetype } from './token-lifecycle-engine';
 import { feedbackLoopEngine, type ValidationReport } from './feedback-loop-engine';
@@ -58,7 +58,7 @@ export interface PipelineResult {
   patternScan: PatternScanResult | null;
   behavioralPrediction: BehavioralPrediction | null;
   crossCorrelation: CrossCorrelationResult | null;
-  deepAnalysis: DeepAnalysis | null;
+  deepAnalysis: DeepAnalysis | DeepAnalysisResult | null;
 
   // Strategy selection (NEW — the key output of this pipeline)
   strategy: StrategySelection | null;
@@ -421,7 +421,7 @@ class BrainAnalysisPipeline {
         const stepStart = Date.now();
         const conditions = this.buildObservationConditions(result);
         if (conditions) {
-          const obsId = await crossCorrelationEngine.recordObservation(
+          const obsId = await crossCorrelationEngine.recordObservationPipeline(
             tokenAddress,
             chain,
             conditions,
@@ -508,7 +508,7 @@ class BrainAnalysisPipeline {
         whaleDirection: this.inferWhaleDirection(token),
         operabilityScore: this.inferOperabilityScore(token),
         patternScan: result.patternScan ?? undefined,
-        crossCorrelation: result.crossCorrelation ?? undefined,
+        crossCorrelation: result.crossCorrelation as any ?? undefined,
         dataReliability,
         candles1h,
         candles5m,
@@ -815,29 +815,29 @@ class BrainAnalysisPipeline {
     const capital = capitalUsd ?? this.config.defaultCapitalUsd;
 
     // Extract key signals from each engine
-    const phase = result.deepAnalysis?.phaseAssessment?.phase
+    const phase = (result.deepAnalysis as any)?.phaseAssessment?.phase
       ?? (result.behavioralPrediction?.phase as TokenPhase | undefined)
       ?? 'INCIPIENT';
 
-    const patternSentiment = result.patternScan?.overallSentiment ?? 'NEUTRAL';
-    const patternScore = result.patternScan?.sentimentScore ?? 0;
-    const dominantPattern = result.patternScan?.dominantPattern?.patternName ?? null;
-    const multiTfConfirmed = result.patternScan?.dominantPattern?.multiTfConfirmation ?? false;
+    const patternSentiment = (result.patternScan as any)?.overallSentiment ?? result.patternScan?.overallSignal ?? 'NEUTRAL';
+    const patternScore = (result.patternScan as any)?.sentimentScore ?? result.patternScan?.overallScore ?? 0;
+    const dominantPattern = (result.patternScan as any)?.dominantPattern?.patternName ?? result.patternScan?.dominantPattern ?? null;
+    const multiTfConfirmed = (result.patternScan as any)?.dominantPattern?.multiTfConfirmation ?? (result.patternScan?.confluences?.length ?? 0 > 0);
 
     const behaviorFlow = result.behavioralPrediction?.netFlowDirection ?? 'NEUTRAL';
     const behaviorScore = result.behavioralPrediction?.netFlowScore ?? 0;
     const behaviorConfidence = result.behavioralPrediction?.confidence ?? 0;
     const dominantArchetype = result.behavioralPrediction?.archetypeBreakdown?.[0]?.archetype ?? 'RETAIL_FOMO';
 
-    const ccDirection = result.crossCorrelation?.overallAssessment?.direction ?? 'NEUTRAL';
-    const ccConfidence = result.crossCorrelation?.overallAssessment?.confidence ?? 0;
-    const ccStrength = result.crossCorrelation?.overallAssessment?.strength ?? 0;
-    const ccWinRate = result.crossCorrelation?.bestStrategy?.expectedWinRate ?? 0;
-    const ccSamples = result.crossCorrelation?.bestStrategy?.sampleSize ?? 0;
+    const ccDirection = (result.crossCorrelation as any)?.overallAssessment?.direction ?? 'NEUTRAL';
+    const ccConfidence = (result.crossCorrelation as any)?.overallAssessment?.confidence ?? 0;
+    const ccStrength = (result.crossCorrelation as any)?.overallAssessment?.strength ?? 0;
+    const ccWinRate = (result.crossCorrelation as any)?.bestStrategy?.expectedWinRate ?? 0;
+    const ccSamples = (result.crossCorrelation as any)?.bestStrategy?.sampleSize ?? 0;
 
-    const verdict = result.deepAnalysis?.verdict?.action ?? 'HOLD';
-    const verdictConfidence = result.deepAnalysis?.verdict?.confidence ?? 0;
-    const riskLevel = result.deepAnalysis?.riskAssessment?.overallRisk ?? 'MEDIUM';
+    const verdict = (result.deepAnalysis as any)?.verdict?.action ?? 'HOLD';
+    const verdictConfidence = (result.deepAnalysis as any)?.verdict?.confidence ?? 0;
+    const riskLevel = (result.deepAnalysis as any)?.riskAssessment?.overallRisk ?? 'MEDIUM';
 
     // ── Determine direction ──
     const direction = this.determineDirection(
@@ -860,7 +860,7 @@ class BrainAnalysisPipeline {
 
     // If cross-correlation suggests a specific strategy, consider overriding
     if (ccConfidence > 0.5 && ccSamples >= this.config.adequateCorrelationSamples) {
-      const ccStrategy = result.crossCorrelation?.bestStrategy?.strategy;
+      const ccStrategy = (result.crossCorrelation as any)?.bestStrategy?.strategy;
       if (ccStrategy === 'LONG' || ccStrategy === 'SHORT') {
         // Cross-correlation has enough samples — use smart-money system
         systemCategory = 'SMART_MONEY';
@@ -869,7 +869,7 @@ class BrainAnalysisPipeline {
     }
 
     // If bot activity is high, switch to bot-aware system
-    const botSwarmLevel = result.deepAnalysis?.traderAssessment?.riskFromBots;
+    const botSwarmLevel = (result.deepAnalysis as any)?.traderAssessment?.riskFromBots;
     if (botSwarmLevel === 'HIGH' || botSwarmLevel === 'CRITICAL') {
       systemCategory = 'BOT_AWARE';
       systemName = 'bot-aware';
@@ -1211,8 +1211,8 @@ class BrainAnalysisPipeline {
     totalSamples: number,
     crossCorrelation: CrossCorrelationResult | null
   ): AnalysisInput['dataReliability'] {
-    const reliableCombinations = crossCorrelation?.conditionalProbabilities
-      ?.filter(cp => cp.validation.isValid && cp.totalObservations >= 30)
+    const reliableCombinations = (crossCorrelation as any)?.conditionalProbabilities
+      ?.filter((cp: any) => cp.validation?.isValid && cp.totalObservations >= 30)
       .length ?? 0;
 
     let sufficiency: string;
@@ -1302,7 +1302,7 @@ class BrainAnalysisPipeline {
         ? (result.behavioralPrediction.netFlowScore > 0.15 ? 'BUY'
           : result.behavioralPrediction.netFlowScore < -0.15 ? 'SELL' : 'HOLD')
         : 'HOLD';
-      const dominantPattern = result.patternScan?.dominantPattern?.patternName ?? 'NO_PATTERN';
+      const dominantPattern = (result.patternScan as any)?.dominantPattern?.patternName ?? result.patternScan?.dominantPattern ?? 'NO_PATTERN';
 
       return {
         traderArchetype: dominantArchetype,
@@ -1351,7 +1351,7 @@ class BrainAnalysisPipeline {
 
           // Update the behavioral model with this observation
           await behavioralModelEngine.updateModel(
-            conditions.traderArchetype,
+            conditions.traderArchetype as TraderArchetype,
             conditions.tokenPhase as TokenPhase,
             observedAction,
             true
@@ -1427,18 +1427,18 @@ class BrainAnalysisPipeline {
           correlationSamples: result.strategy.correlationSamples,
           reasoning: result.strategy.reasoning,
           // Store deep analysis verdict for comparison
-          deepVerdict: result.deepAnalysis?.verdict?.action ?? null,
-          deepVerdictConfidence: result.deepAnalysis?.verdict?.confidence ?? 0,
+          deepVerdict: (result.deepAnalysis as any)?.verdict?.action ?? null,
+          deepVerdictConfidence: (result.deepAnalysis as any)?.verdict?.confidence ?? 0,
           // Store pattern sentiment
-          patternSentiment: result.patternScan?.overallSentiment ?? 'NEUTRAL',
-          patternScore: result.patternScan?.sentimentScore ?? 0,
+          patternSentiment: (result.patternScan as any)?.overallSentiment ?? result.patternScan?.overallSignal ?? 'NEUTRAL',
+          patternScore: (result.patternScan as any)?.sentimentScore ?? result.patternScan?.overallScore ?? 0,
           // Store behavior flow
           behaviorFlow: result.behavioralPrediction?.netFlowDirection ?? 'NEUTRAL',
           behaviorScore: result.behavioralPrediction?.netFlowScore ?? 0,
           // Store cross-correlation assessment
-          ccDirection: result.crossCorrelation?.overallAssessment?.direction ?? 'NEUTRAL',
-          ccConfidence: result.crossCorrelation?.overallAssessment?.confidence ?? 0,
-          ccRecommendation: result.crossCorrelation?.overallAssessment?.recommendation ?? 'NO_DATA',
+          ccDirection: (result.crossCorrelation as any)?.overallAssessment?.direction ?? 'NEUTRAL',
+          ccConfidence: (result.crossCorrelation as any)?.overallAssessment?.confidence ?? 0,
+          ccRecommendation: (result.crossCorrelation as any)?.overallAssessment?.recommendation ?? 'NO_DATA',
           // Data quality
           dataQuality: result.dataQuality.overallQuality,
           pipelineStepsCompleted: result.stepsCompleted,
@@ -1451,7 +1451,7 @@ class BrainAnalysisPipeline {
         evidence: JSON.stringify({
           entryConditions: result.strategy.entryConditions,
           exitConditions: result.strategy.exitConditions,
-          riskAssessment: result.deepAnalysis?.riskAssessment?.overallRisk ?? 'UNKNOWN',
+          riskAssessment: (result.deepAnalysis as any)?.riskAssessment?.overallRisk ?? 'UNKNOWN',
         }),
         dataPointsUsed: result.dataQuality.candles1h + result.dataQuality.candles5m + result.dataQuality.tradersAnalyzed,
       },
@@ -1469,9 +1469,9 @@ class BrainAnalysisPipeline {
    * Infer market regime from pattern + behavior + cross-correlation signals.
    */
   private inferRegime(result: PipelineResult): 'BULL' | 'BEAR' | 'SIDEWAYS' | 'TRANSITION' {
-    const sentiment = result.patternScan?.sentimentScore ?? 0;
+    const sentiment = (result.patternScan as any)?.sentimentScore ?? result.patternScan?.overallScore ?? 0;
     const behavior = result.behavioralPrediction?.netFlowScore ?? 0;
-    const ccStrength = result.crossCorrelation?.overallAssessment?.strength ?? 0;
+    const ccStrength = (result.crossCorrelation as any)?.overallAssessment?.strength ?? 0;
 
     const composite = sentiment * 0.4 + behavior * 0.35 + ccStrength * 0.25;
 
@@ -1485,9 +1485,9 @@ class BrainAnalysisPipeline {
    * Infer regime confidence from the consistency of signals.
    */
   private inferRegimeConfidence(result: PipelineResult): number {
-    const sentiment = result.patternScan?.sentimentScore ?? 0;
+    const sentiment = (result.patternScan as any)?.sentimentScore ?? result.patternScan?.overallScore ?? 0;
     const behavior = result.behavioralPrediction?.netFlowScore ?? 0;
-    const ccStrength = result.crossCorrelation?.overallAssessment?.strength ?? 0;
+    const ccStrength = (result.crossCorrelation as any)?.overallAssessment?.strength ?? 0;
 
     // If all signals agree, confidence is high
     const signals = [sentiment, behavior, ccStrength];
