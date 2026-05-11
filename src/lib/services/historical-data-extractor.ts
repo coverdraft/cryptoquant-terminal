@@ -109,7 +109,7 @@ export class HistoricalDataExtractor {
   constructor(config: Partial<MassiveBackfillConfig> = {}) {
     this.config = { ...DEFAULT_BACKFILL_CONFIG, ...config };
     this.dexscreener = new DexScreenerClient();
-    this.birdeye = new BirdeyeClient(DEFAULT_CONFIG.birdeyeApiUrl, DEFAULT_CONFIG.birdeyeApiKey);
+    this.birdeye = new BirdeyeClient(); // DEPRECATED - Birdeye no longer supported, stub only
     this.solana = new SolanaRpcClient(DEFAULT_CONFIG.solanaRpcUrl);
     this.ethereum = new EthereumRpcClient(DEFAULT_CONFIG.ethereumRpcUrl);
     this.ohlcv = new OHLCVPipeline();
@@ -269,9 +269,8 @@ export class HistoricalDataExtractor {
 
     console.log(`[historical-extractor] Phase 2: OHLCV Backfill for ${tokenAddresses.length} tokens...`);
 
-    // Check if Birdeye API key is available
-    const hasBirdeyeKey = !!DEFAULT_CONFIG.birdeyeApiKey;
-    console.log(`[historical-extractor] Birdeye API key: ${hasBirdeyeKey ? 'YES' : 'NO — using DexScreener price snapshots'}`);
+    // Birdeye is no longer available - always use CoinGecko/OHLCV pipeline
+    console.log(`[historical-extractor] Using CoinGecko + OHLCV Pipeline for candle data`);
 
     // Process in batches to control concurrency
     for (let i = 0; i < tokenAddresses.length; i += this.config.batchSize) {
@@ -287,15 +286,9 @@ export class HistoricalDataExtractor {
           const token = await db.token.findUnique({ where: { address: addr }, select: { chain: true, priceUsd: true, volume24h: true } });
           const chain = this.normalizeChain(token?.chain || 'SOL');
 
-          if (hasBirdeyeKey) {
-            // Primary: Birdeye OHLCV backfill
-            const result = await this.ohlcv.backfillToken(addr, chain, this.config.timeframes);
-            totalCandles += result.totalStored;
-          } else {
-            // Fallback: Build approximate candles from DexScreener price data
-            const snapshotCandles = await this.buildCandlesFromSnapshot(addr, chain, token ? { priceUsd: toNum(token.priceUsd), volume24h: toNum(token.volume24h) } : null);
-            totalCandles += snapshotCandles;
-          }
+          // Use CoinGecko/OHLCV pipeline for backfill (Birdeye no longer available)
+          const result = await this.ohlcv.backfillToken(addr, chain, this.config.timeframes);
+          totalCandles += result.totalStored;
 
           processed++;
 

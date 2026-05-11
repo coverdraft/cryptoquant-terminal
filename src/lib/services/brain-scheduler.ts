@@ -204,7 +204,10 @@ class BrainScheduler {
 
     this.status = 'STARTING';
 
-    // Merge config
+    // Load previous state from database (resumes config, task counts, etc.)
+    await this.loadState();
+
+    // Merge config (overrides loaded state if provided)
     if (config) {
       this.config = { ...this.config, ...config };
     }
@@ -294,6 +297,9 @@ class BrainScheduler {
     import('../ws-bridge').then(({ wsBridge }) => wsBridge.pushSchedulerStatus({ status: 'RUNNING', uptime: 0 })).catch(() => {});
     console.log(`[BrainScheduler] Started with $${this.config.capitalUsd} capital, chain: ${this.config.chain}`);
 
+    // Persist the RUNNING state to database
+    await this.persistState();
+
     return {
       started: true,
       message: `Brain scheduler started with $${this.config.capitalUsd} capital. ${tasks.length} tasks registered.`,
@@ -326,6 +332,10 @@ class BrainScheduler {
 
     this.status = 'STOPPED';
     this.emitEvent({ type: 'status_changed', data: { from: previousStatus, to: 'STOPPED' } });
+
+    // Persist the STOPPED state to database
+    await this.persistState();
+
     return { stopped: true, message: 'Brain scheduler stopped. All tasks cancelled.' };
   }
 
@@ -961,6 +971,11 @@ class BrainScheduler {
           });
         }).catch(() => {});
       }
+
+      // Persist state to database after every successful task
+      this.persistState().catch(err => {
+        console.warn('[BrainScheduler] Failed to persist state after task success:', err);
+      });
     }
   }
 
@@ -974,8 +989,140 @@ class BrainScheduler {
       status.lastError = errorMsg;
     }
 
+    this.lastError = errorMsg;
     this.emitEvent({ type: 'error', data: { task: name, error: errorMsg } });
     console.error(`[BrainScheduler] Task ${name} error:`, errorMsg);
+
+    // Persist state to database after every error
+    this.persistState().catch(err => {
+      console.warn('[BrainScheduler] Failed to persist state after task error:', err);
+    });
+  }
+
+  // ============================================================
+  // STATE PERSISTENCE (Survives Restarts)
+  // ============================================================
+
+  /**
+   * Save current state to database so it survives server restarts.
+   * Called after every task success/error, on start, and on stop.
+   */
+  private async persistState(): Promise<void> {
+    try {
+      const taskStatesObj: Record<string, any> = {};
+      for (const [name, status] of this.taskStatuses) {
+        taskStatesObj[name] = {
+          lastRunAt: status.lastRunAt?.toISOString() ?? null,
+          nextRunAt: status.nextRunAt?.toISOString() ?? null,
+          runCount: status.runCount,
+          errorCount: status.errorCount,
+          lastError: status.lastError,
+          lastDurationMs: status.lastDurationMs,
+          isRunning: status.isRunning,
+        };
+      }
+
+      await db.schedulerState.upsert({
+        where: { id: 'main' },
+        create: {
+          id: 'main',
+          status: this.status,
+          config: JSON.stringify(this.config),
+          lastCycleNumber: this.taskStatuses.get('brain_cycle')?.runCount ?? 0,
+          totalCycles: this.taskStatuses.get('brain_cycle')?.runCount ?? 0,
+          capitalUsd: this.config.capitalUsd,
+          initialCapitalUsd: this.config.initialCapitalUsd,
+          chain: this.config.chain,
+          scanLimit: this.config.scanLimit,
+          startedAt: this.startedAt,
+          lastError: this.lastError,
+          taskStates: JSON.stringify(taskStatesObj),
+        },
+        update: {
+          status: this.status,
+          config: JSON.stringify(this.config),
+          lastCycleNumber: this.taskStatuses.get('brain_cycle')?.runCount ?? 0,
+          totalCycles: this.taskStatuses.get('brain_cycle')?.runCount ?? 0,
+          capitalUsd: this.config.capitalUsd,
+          initialCapitalUsd: this.config.initialCapitalUsd,
+          chain: this.config.chain,
+          scanLimit: this.config.scanLimit,
+          lastError: this.lastError,
+          taskStates: JSON.stringify(taskStatesObj),
+          startedAt: this.startedAt,
+          ...(this.status === 'STOPPED' ? { stoppedAt: new Date() } : {}),
+        },
+      });
+    } catch (error) {
+      console.warn('[BrainScheduler] persistState failed:', error);
+    }
+  }
+
+  /**
+   * Load previous state from database.
+   * Restores config, task run counts, error counts, and timestamps.
+   * Called at the beginning of start().
+   */
+  private async loadState(): Promise<void> {
+    try {
+      const state = await db.schedulerState.findUnique({ where: { id: 'main' } });
+      if (state) {
+        // Restore config from DB, merging with defaults for any missing keys
+        const savedConfig = JSON.parse(state.config || '{}');
+        this.config = { ...DEFAULT_SCHEDULER_CONFIG, ...savedConfig };
+
+        // Restore startedAt timestamp (for continuity display)
+        this.startedAt = state.startedAt;
+        this.lastError = state.lastError;
+
+        // Restore task states (run counts, error counts, etc.)
+        const taskStatesObj = JSON.parse(state.taskStates || '{}');
+        for (const [name, ts] of Object.entries(taskStatesObj)) {
+          const status = this.taskStatuses.get(name);
+          if (status) {
+            const tsData = ts as any;
+            status.runCount = tsData.runCount ?? 0;
+            status.errorCount = tsData.errorCount ?? 0;
+            status.lastError = tsData.lastError ?? null;
+            status.lastDurationMs = tsData.lastDurationMs ?? 0;
+            status.isRunning = false; // Never resume as "running" - will be re-triggered by scheduler
+            // Restore lastRunAt if available
+            if (tsData.lastRunAt) {
+              status.lastRunAt = new Date(tsData.lastRunAt);
+            }
+          }
+        }
+
+        console.log(
+          `[BrainScheduler] Loaded state from DB: status=${state.status}, ` +
+          `cycles=${state.totalCycles}, capital=$${state.capitalUsd}, ` +
+          `lastStarted=${state.startedAt?.toISOString() ?? 'never'}`
+        );
+      }
+    } catch (error) {
+      console.warn('[BrainScheduler] loadState failed (starting fresh):', error);
+    }
+  }
+
+  /**
+   * Check if the scheduler was previously running (for auto-start on server restart).
+   * Returns the saved state if it was RUNNING, or null otherwise.
+   */
+  async getPreviousState(): Promise<{ wasRunning: boolean; config: Partial<SchedulerConfig> | null; state: any }> {
+    try {
+      const state = await db.schedulerState.findUnique({ where: { id: 'main' } });
+      if (state) {
+        const savedConfig = JSON.parse(state.config || '{}');
+        return {
+          wasRunning: state.status === 'RUNNING',
+          config: savedConfig,
+          state,
+        };
+      }
+    } catch (error) {
+      console.warn('[BrainScheduler] getPreviousState failed:', error);
+    }
+    return { wasRunning: false, config: null, state: null };
   }
 }
 

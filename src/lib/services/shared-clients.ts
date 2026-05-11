@@ -1,9 +1,14 @@
 /**
  * Shared service instances for API routes
  *
- * Provides singleton clients from universal-data-extractor.ts and birdeye-client.ts
+ * Provides singleton clients from various data sources
  * so that API route handlers don't need to construct their own
  * cache/client instances on every request.
+ *
+ * Data sources (NO Birdeye - use CoinGecko instead):
+ *   - CoinGecko (PRIMARY - market data, prices, volumes, OHLCV) [FREE, no API key]
+ *   - DexScreener (multi-chain token data, DEX pairs/pools) [FREE]
+ *   - DexPaprika (35 chains, pool swaps, buy/sell ratios) [FREE]
  */
 
 import {
@@ -12,7 +17,7 @@ import {
   MoralisClient,
 } from './universal-data-extractor';
 import { UnifiedCache } from './source-cache';
-import { BirdeyeClient } from './birdeye-client';
+import { CoinGeckoClient } from './coingecko-client';
 import { DexPaprikaClient } from './dexpaprika-client';
 
 // Shared cache instance (15-minute TTL)
@@ -33,11 +38,8 @@ export const moralisClient = new MoralisClient(
   sharedCache,
 );
 
-/** Shared Birdeye client for price/OHLCV data */
-export const birdeyeClient = new BirdeyeClient(
-  process.env.BIRDEYE_API_URL || 'https://public-api.birdeye.so',
-  process.env.BIRDEYE_API_KEY,
-);
+/** Shared CoinGecko client for price/OHLCV data (replaces Birdeye) */
+export const coinGeckoClient = new CoinGeckoClient();
 
 /** Shared DexPaprika client for multi-chain DEX data (FREE, no API key) */
 export const dexPaprikaClient = new DexPaprikaClient();

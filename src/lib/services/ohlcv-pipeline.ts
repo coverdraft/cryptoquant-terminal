@@ -8,14 +8,12 @@
  * - CoinGecko API (PRIMARY - free, no API key, OHLCV via /coins/{id}/ohlc)
  * - DexPaprika API (35 chains, pool-level OHLCV)
  * - DexScreener API (supplementary price data)
- * - Birdeye API (fallback OHLCV feed, optional - requires API key)
  * - Internal aggregation (live candle building from tick data)
  *
  * Timeframes: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d, 1w
  */
 
 import { db } from '../db';
-import { BirdeyeClient, DEFAULT_CONFIG } from './data-ingestion';
 import { dexPaprikaClient, type DexPaprikaOHLCV } from './dexpaprika-client';
 import { coinGeckoClient, type CoinGeckoOHLCVCandle } from './coingecko-client';
 
@@ -109,18 +107,6 @@ const DEFAULT_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
 /** Timeframes for live candle ingestion */
 const LIVE_TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'] as const;
 
-/** Map internal timeframe keys to Birdeye API format */
-const BIRDEYE_TF_MAP: Record<string, string> = {
-  '1m': '1m',
-  '3m': '3m',
-  '5m': '5m',
-  '15m': '15m',
-  '30m': '30m',
-  '1h': '1H',
-  '4h': '4H',
-  '1d': '1D',
-};
-
 /** Map internal timeframes to CoinGecko OHLCV days parameter.
  * CoinGecko only supports specific day values.
  * Candle granularity depends on days selected:
@@ -191,17 +177,8 @@ export const TIMEFRAME_CONTEXTS = {
   QUICK: ['5m', '1h', '1d'] as const,
 } as const;
 
-/** Birdeye free-tier limit per request */
-const BIRDEYE_CHUNK_SIZE = 200;
-
 /** Delay between sequential API calls (ms) */
 const INTER_REQUEST_DELAY = 50;
-
-/** Delay on rate-limit (429) responses (ms) */
-const RATE_LIMIT_RETRY_DELAY = 1000;
-
-/** Maximum retry attempts for rate-limited requests */
-const MAX_RATE_LIMIT_RETRIES = 3;
 
 // ============================================================
 // CANDLE AGGREGATION
@@ -266,13 +243,8 @@ export function aggregateCandles(
 // ============================================================
 
 export class OHLCVPipeline {
-  private birdeye: BirdeyeClient;
-
   constructor() {
-    this.birdeye = new BirdeyeClient(
-      DEFAULT_CONFIG.birdeyeApiUrl,
-      DEFAULT_CONFIG.birdeyeApiKey,
-    );
+    // CoinGecko is the ONLY OHLCV source (Birdeye removed).
   }
 
   // ----------------------------------------------------------
@@ -372,8 +344,7 @@ export class OHLCVPipeline {
    * Strategy (in priority order):
    * 1. Try CoinGecko OHLCV (free, no API key, good for major coins)
    * 2. Try DexScreener/DexPaprika for DEX-specific data
-   * 3. Try Birdeye as last resort (optional, requires API key)
-   * 4. For aggregated timeframes, build from source data
+   * 3. For aggregated timeframes, build from source data
    */
   async backfillToken(
     tokenAddress: string,
@@ -405,12 +376,18 @@ export class OHLCVPipeline {
       }
     }
 
-    // Step 2: Backfill remaining source timeframes from Birdeye/DexPaprika
+    // Step 2: Backfill remaining source timeframes from CoinGecko (use closest days mapping)
     for (const tf of nonCoinGeckoTfs) {
-      const birdeyeTf = BIRDEYE_TF_MAP[tf] ?? tf;
-      const tfResult = await this.backfillTimeframe(tokenAddress, chain, tf, birdeyeTf);
-      tfResults.push(tfResult);
-      totalStored += tfResult.candlesStored;
+      // For timeframes not directly supported by CoinGecko, try the closest mapping
+      // These will get 30m or 4h candles from CoinGecko
+      const fallbackDays = tf === '1m' || tf === '3m' || tf === '5m' || tf === '15m' ? 1 : 7;
+      try {
+        const tfResult = await this.backfillTimeframe(tokenAddress, chain, tf, fallbackDays);
+        tfResults.push(tfResult);
+        totalStored += tfResult.candlesStored;
+      } catch {
+        // Backfill failed for this timeframe
+      }
       await this.delay(INTER_REQUEST_DELAY);
     }
 
@@ -504,61 +481,39 @@ export class OHLCVPipeline {
   }
 
   /**
-   * Backfill a single timeframe for a token.
-   * Determines start point from the last stored candle and fetches
-   * in chunks until the present.
+   * Backfill a single timeframe for a token using CoinGecko.
+   * CoinGecko is the ONLY OHLCV source now.
    */
   private async backfillTimeframe(
     tokenAddress: string,
     chain: string,
     internalTf: string,
-    birdeyeTf: string,
+    days: number,
   ): Promise<BackfillResult['timeframes'][0]> {
     let candlesFetched = 0;
     let candlesStored = 0;
     let oldestCandle: Date | null = null;
     let newestCandle: Date | null = null;
 
-    // Step 1: Find the last stored candle to determine where to resume
-    const lastCandle = await db.priceCandle.findFirst({
-      where: { tokenAddress, chain, timeframe: internalTf },
-      orderBy: { timestamp: 'desc' },
-    });
+    try {
+      // Fetch OHLCV from CoinGecko
+      const candles = await this.fetchCoinGeckoOHLCV(tokenAddress, chain, days);
 
-    const now = Math.floor(Date.now() / 1000);
-    const tfSeconds = TIMEFRAME_SECONDS[internalTf] ?? 3600;
-
-    // Start from after the last candle, or look back ~200 periods
-    let cursorTime: number;
-    if (lastCandle) {
-      cursorTime = Math.floor(lastCandle.timestamp.getTime() / 1000) + tfSeconds;
-    } else {
-      cursorTime = now - BIRDEYE_CHUNK_SIZE * tfSeconds;
-    }
-
-    // Step 2: Fetch in chunks until we reach the present
-    let hasMore = true;
-    while (hasMore && cursorTime < now) {
-      const chunkEnd = Math.min(cursorTime + BIRDEYE_CHUNK_SIZE * tfSeconds, now);
-
-      const items = await this.fetchBirdeyeOHLCV(
-        tokenAddress,
-        birdeyeTf,
-        cursorTime,
-        chunkEnd,
-        chain,
-      );
-
-      if (items.length === 0) {
-        hasMore = false;
-        break;
+      if (candles.length === 0) {
+        return {
+          timeframe: internalTf,
+          candlesFetched: 0,
+          candlesStored: 0,
+          oldestCandle: null,
+          newestCandle: null,
+        };
       }
 
-      candlesFetched += items.length;
+      // Determine the actual timeframe from CoinGecko
+      const actualTf = COINGECKO_DAYS_TO_TF[days] ?? internalTf;
 
-      // Step 3: Upsert each candle
-      for (const item of items) {
-        const candleTs = new Date(item.unixTime * 1000);
+      for (const item of candles) {
+        const candleTs = new Date(item.timestamp);
 
         try {
           await db.priceCandle.upsert({
@@ -566,14 +521,14 @@ export class OHLCVPipeline {
               tokenAddress_chain_timeframe_timestamp: {
                 tokenAddress,
                 chain,
-                timeframe: internalTf,
+                timeframe: actualTf,
                 timestamp: candleTs,
               },
             },
             create: {
               tokenAddress,
               chain,
-              timeframe: internalTf,
+              timeframe: actualTf,
               timestamp: candleTs,
               open: item.open,
               high: item.high,
@@ -581,37 +536,24 @@ export class OHLCVPipeline {
               close: item.close,
               volume: item.volume,
               trades: 0,
-              source: 'birdeye',
+              source: 'coingecko',
             },
             update: {
-              high: Math.max(item.high, item.low),
-              low: Math.min(item.low, item.high),
               close: item.close,
               volume: item.volume,
             },
           });
 
+          candlesFetched++;
           candlesStored++;
           if (!oldestCandle || candleTs < oldestCandle) oldestCandle = candleTs;
           if (!newestCandle || candleTs > newestCandle) newestCandle = candleTs;
-        } catch (err) {
-          console.warn(
-            `[ohlcv-pipeline] upsert failed for ${tokenAddress} ${internalTf} ${candleTs.toISOString()}:`,
-            err,
-          );
+        } catch {
+          // Skip failed upserts
         }
       }
-
-      // Advance cursor past the last fetched candle
-      const lastUnix = items[items.length - 1].unixTime;
-      cursorTime = lastUnix + tfSeconds;
-
-      // If we got fewer than the chunk size, we've reached the end
-      if (items.length < BIRDEYE_CHUNK_SIZE) {
-        hasMore = false;
-      }
-
-      await this.delay(INTER_REQUEST_DELAY);
+    } catch {
+      // CoinGecko backfill failed for this timeframe
     }
 
     return {
@@ -1123,68 +1065,8 @@ export class OHLCVPipeline {
             }
           }
         } catch {
-          // CoinGecko on-demand failed, try Birdeye
+          // CoinGecko on-demand failed
         }
-      }
-
-      // Try Birdeye on-demand fetch for source timeframes (fallback)
-      const birdeyeTf = BIRDEYE_TF_MAP[timeframe];
-      if (birdeyeTf) {
-        const chain = 'SOL';
-        const now = Math.floor(Date.now() / 1000);
-        const tfSeconds = TIMEFRAME_SECONDS[timeframe] ?? 3600;
-        const timeFrom = from
-          ? Math.floor(from.getTime() / 1000)
-          : now - limit * tfSeconds;
-
-        const items = await this.fetchBirdeyeOHLCV(
-          tokenAddress,
-          birdeyeTf,
-          timeFrom,
-          now,
-          chain,
-        );
-
-        for (const item of items) {
-          const candleTs = new Date(item.unixTime * 1000);
-          try {
-            await db.priceCandle.upsert({
-              where: {
-                tokenAddress_chain_timeframe_timestamp: {
-                  tokenAddress,
-                  chain,
-                  timeframe,
-                  timestamp: candleTs,
-                },
-              },
-              create: {
-                tokenAddress,
-                chain,
-                timeframe,
-                timestamp: candleTs,
-                open: item.open,
-                high: item.high,
-                low: item.low,
-                close: item.close,
-                volume: item.volume,
-                trades: 0,
-                source: 'birdeye',
-              },
-              update: {
-                close: item.close,
-                volume: item.volume,
-              },
-            });
-          } catch {
-            // Skip
-          }
-        }
-
-        candles = await db.priceCandle.findMany({
-          where,
-          orderBy: { timestamp: 'asc' },
-          take: limit,
-        });
       }
     }
 
@@ -1314,90 +1196,6 @@ export class OHLCVPipeline {
   // PRIVATE HELPERS
   // ----------------------------------------------------------
 
-  /**
-   * Fetch OHLCV data from the Birdeye API with rate-limit handling.
-   * Falls back to direct fetch if the BirdeyeClient fails.
-   */
-  private async fetchBirdeyeOHLCV(
-    address: string,
-    birdeyeTf: string,
-    timeFrom: number,
-    timeTo: number,
-    chain: string,
-  ): Promise<Array<{ unixTime: number; open: number; high: number; low: number; close: number; volume: number }>> {
-    for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
-      try {
-        const items = await this.birdeye.getOHLCV(
-          address,
-          birdeyeTf as '1m' | '3m' | '5m' | '15m' | '30m' | '1H' | '4H' | '1D',
-          BIRDEYE_CHUNK_SIZE,
-          chain,
-        );
-
-        return items.filter((item) => item.unixTime >= timeFrom && item.unixTime <= timeTo);
-      } catch (err) {
-        console.warn(
-          `[ohlcv-pipeline] BirdeyeClient failed, trying direct fetch (attempt ${attempt + 1}):`,
-          err,
-        );
-      }
-
-      try {
-        const url =
-          `https://public-api.birdeye.so/defi/ohlcv` +
-          `?address=${address}&type=${birdeyeTf}&time_from=${timeFrom}&time_to=${timeTo}`;
-
-        const res = await fetch(url, {
-          headers: {
-            'Accept': 'application/json',
-            'X-API-KEY': 'public',
-            'x-chain': chain,
-          },
-        });
-
-        if (res.status === 429) {
-          console.warn('[ohlcv-pipeline] Rate limited by Birdeye, retrying...');
-          await this.delay(RATE_LIMIT_RETRY_DELAY);
-          continue;
-        }
-
-        if (!res.ok) {
-          console.warn(`[ohlcv-pipeline] Birdeye OHLCV returned ${res.status}`);
-          return [];
-        }
-
-        const data = await res.json();
-        if (!data.success || !data.data?.items) return [];
-
-        return data.data.items as Array<{
-          unixTime: number;
-          open: number;
-          high: number;
-          low: number;
-          close: number;
-          volume: number;
-        }>;
-      } catch (err) {
-        if (attempt < MAX_RATE_LIMIT_RETRIES) {
-          console.warn(
-            `[ohlcv-pipeline] Direct fetch failed (attempt ${attempt + 1}), retrying:`,
-            err,
-          );
-          await this.delay(RATE_LIMIT_RETRY_DELAY);
-        } else {
-          console.error('[ohlcv-pipeline] All fetch attempts exhausted:', err);
-          return [];
-        }
-      }
-    }
-
-    return [];
-  }
-
-  /**
-   * Floor a timestamp to the start of its candle period.
-   * E.g. 14:37:22 floored to 1h → 14:00:00
-   */
   private floorToPeriod(date: Date, timeframe: string): Date {
     const ts = date.getTime();
     const seconds = TIMEFRAME_SECONDS[timeframe];

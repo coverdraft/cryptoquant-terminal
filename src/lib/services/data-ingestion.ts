@@ -6,7 +6,6 @@
  * - Solana RPC (mainnet-beta)
  * - Ethereum RPC
  * - DexScreener API (multi-chain token data, DEX pairs/pools)
- * - Birdeye API (price feeds, OHLCV) [OPTIONAL - requires API key]
  * - Jupiter API (Solana swap aggregator)
  * - DexPaprika API (35 chains, pool swaps, buy/sell ratios)
  * - Helius API (Solana enhanced transactions)
@@ -16,7 +15,6 @@
  *   1. CoinGecko (market data: prices, volumes, market caps, OHLCV)
  *   2. DexScreener (DEX-specific: pairs, pools, buy/sell ratios)
  *   3. DexPaprika (35-chain coverage, pool-level data)
- *   4. Birdeye (optional fallback, requires API key)
  * 
  * Production should use paid RPCs for reliability.
  */
@@ -29,8 +27,6 @@ export interface IngestionConfig {
   solanaRpcUrl: string;
   ethereumRpcUrl: string;
   dexscreenerApiUrl: string;
-  birdeyeApiUrl: string;
-  birdeyeApiKey?: string;
   jupiterApiUrl: string;
   heliusApiKey?: string;
   etherscanApiKey?: string;
@@ -137,8 +133,6 @@ export const DEFAULT_CONFIG: IngestionConfig = {
   solanaRpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
   ethereumRpcUrl: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
   dexscreenerApiUrl: 'https://api.dexscreener.com',
-  birdeyeApiUrl: 'https://public-api.birdeye.so',
-  birdeyeApiKey: process.env.BIRDEYE_API_KEY,
   jupiterApiUrl: 'https://quote-api.jup.ag/v6',
   heliusApiKey: process.env.HELIUS_API_KEY,
   etherscanApiKey: process.env.ETHERSCAN_API_KEY,
@@ -236,154 +230,43 @@ export class DexScreenerClient {
 }
 
 // ============================================================
-// BIRDEYE CLIENT - Price feeds and OHLCV data
+// BIRDEYE CLIENT STUB - DEPRECATED (use CoinGecko instead)
+// Kept for backward compatibility with existing imports.
 // ============================================================
 
 export class BirdeyeClient {
-  private baseUrl: string;
-  private apiKey?: string;
-  
-  constructor(baseUrl = DEFAULT_CONFIG.birdeyeApiUrl, apiKey?: string) {
-    this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
+  constructor(_baseUrl?: string, _apiKey?: string) {
+    // Birdeye is no longer available - use CoinGecko instead
   }
   
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
-      'Accept': 'application/json',
-    };
-    if (this.apiKey) {
-      headers['X-API-KEY'] = this.apiKey;
-      headers['x-chain'] = 'solana';
-    }
-    return headers;
+  async getPrice(_address: string, _chain?: string): Promise<BirdeyePriceData | null> {
+    console.warn('[Birdeye] DEPRECATED: Use CoinGecko instead.');
+    return null;
   }
   
-  /**
-   * Get current price for a token
-   */
-  async getPrice(address: string, chain = 'solana'): Promise<BirdeyePriceData | null> {
-    try {
-      const res = await fetch(
-        `${this.baseUrl}/defi/price?address=${address}&check_liquidity=true`,
-        { headers: { ...this.getHeaders(), 'x-chain': chain } }
-      );
-      if (!res.ok) throw new Error(`Birdeye price failed: ${res.status}`);
-      const data = await res.json();
-      return data.success ? data.data : null;
-    } catch (error) {
-      console.error('Birdeye price error:', error);
-      return null;
-    }
-  }
-  
-  /**
-   * Get OHLCV data for a token
-   */
   async getOHLCV(
-    address: string,
-    timeframe: '1m' | '3m' | '5m' | '15m' | '30m' | '1H' | '4H' | '1D' = '1H',
-    limit = 100,
-    chain = 'solana'
+    _address: string,
+    _timeframe?: string,
+    _limit?: number,
+    _chain?: string,
   ): Promise<Array<{ unixTime: number; open: number; high: number; low: number; close: number; volume: number }>> {
-    try {
-      const now = Math.floor(Date.now() / 1000);
-      const timeframeSeconds: Record<string, number> = {
-        '1m': 60, '3m': 180, '5m': 300, '15m': 900,
-        '30m': 1800, '1H': 3600, '4H': 14400, '1D': 86400,
-      };
-      const timeFrom = now - (limit * (timeframeSeconds[timeframe] || 3600));
-      
-      const res = await fetch(
-        `${this.baseUrl}/defi/ohlcv?address=${address}&type=${timeframe}&time_from=${timeFrom}&time_to=${now}`,
-        { headers: { ...this.getHeaders(), 'x-chain': chain } }
-      );
-      if (!res.ok) throw new Error(`Birdeye OHLCV failed: ${res.status}`);
-      const data = await res.json();
-      return data.success ? data.data?.items || [] : [];
-    } catch (error) {
-      console.error('Birdeye OHLCV error:', error);
-      return [];
-    }
+    console.warn('[Birdeye] DEPRECATED: Use CoinGecko instead.');
+    return [];
   }
   
-  /**
-   * Get token list by market cap
-   */
-  async getTokenList(
-    sort = 'v24hUSD',
-    sortType = 'desc',
-    limit = 50,
-    chain = 'solana'
-  ): Promise<BirdeyePriceData[]> {
-    try {
-      const res = await fetch(
-        `${this.baseUrl}/defi/tokenlist?sort_by=${sort}&sort_type=${sortType}&limit=${limit}&offset=0`,
-        { headers: { ...this.getHeaders(), 'x-chain': chain } }
-      );
-      if (!res.ok) throw new Error(`Birdeye tokenlist failed: ${res.status}`);
-      const data = await res.json();
-      return data.success ? data.data?.tokens || [] : [];
-    } catch (error) {
-      console.error('Birdeye tokenlist error:', error);
-      return [];
-    }
+  async getTokenList(_sort?: string, _sortType?: string, _limit?: number, _chain?: string): Promise<BirdeyePriceData[]> {
+    console.warn('[Birdeye] DEPRECATED: Use CoinGecko trending instead.');
+    return [];
   }
   
-  /**
-   * Get transaction history for a wallet
-   */
-  async getWalletTransactions(
-    address: string,
-    limit = 50,
-    chain = 'solana'
-  ): Promise<ParsedTransaction[]> {
-    try {
-      const res = await fetch(
-        `${this.baseUrl}/defi/wallet/token_list?wallet=${address}`,
-        { headers: { ...this.getHeaders(), 'x-chain': chain } }
-      );
-      if (!res.ok) throw new Error(`Birdeye wallet failed: ${res.status}`);
-      const data = await res.json();
-      // Parse Birdeye response into our format
-      if (!data.success || !data.data) return [];
-      
-      return (data.data.items || []).map((item: Record<string, unknown>) => ({
-        txHash: (item.signature as string) || '',
-        blockTime: new Date((item.blockTime as number) || Date.now()),
-        action: 'SWAP' as const,
-        tokenAddress: (item.address as string) || '',
-        amountIn: Number(item.amountIn || 0),
-        amountOut: Number(item.amountOut || 0),
-        valueUsd: Number(item.valueUsd || 0),
-        isFrontrun: false,
-        isSandwich: false,
-      }));
-    } catch (error) {
-      console.error('Birdeye wallet transactions error:', error);
-      return [];
-    }
+  async getWalletTransactions(_address: string, _limit?: number, _chain?: string): Promise<ParsedTransaction[]> {
+    console.warn('[Birdeye] DEPRECATED: Use Solana RPC instead.');
+    return [];
   }
   
-  /**
-   * Get new token listings
-   */
-  async getNewListings(
-    limit = 20,
-    chain = 'solana'
-  ): Promise<BirdeyePriceData[]> {
-    try {
-      const res = await fetch(
-        `${this.baseUrl}/defi/token_new_listing?limit=${limit}`,
-        { headers: { ...this.getHeaders(), 'x-chain': chain } }
-      );
-      if (!res.ok) throw new Error(`Birdeye new listings failed: ${res.status}`);
-      const data = await res.json();
-      return data.success ? data.data || [] : [];
-    } catch (error) {
-      console.error('Birdeye new listings error:', error);
-      return [];
-    }
+  async getNewListings(_limit?: number, _chain?: string): Promise<BirdeyePriceData[]> {
+    console.warn('[Birdeye] DEPRECATED: Use CoinGecko trending instead.');
+    return [];
   }
 }
 
@@ -591,32 +474,28 @@ export class EthereumRpcClient {
 
 export class DataIngestionPipeline {
   private dexscreener: DexScreenerClient;
-  private birdeye: BirdeyeClient;
+  private birdeye: BirdeyeClient; // DEPRECATED stub - use coingecko instead
   private jupiter: JupiterClient;
   private solana: SolanaRpcClient;
   private ethereum: EthereumRpcClient;
   private dexpaprika: import('./dexpaprika-client').DexPaprikaClient;
   private coingecko: import('./coingecko-client').CoinGeckoClient;
-  private birdeyeApiKeyAvailable: boolean;
   
   constructor(config: Partial<IngestionConfig> = {}) {
     const merged = { ...DEFAULT_CONFIG, ...config };
     this.dexscreener = new DexScreenerClient(merged.dexscreenerApiUrl);
-    this.birdeye = new BirdeyeClient(merged.birdeyeApiUrl, merged.birdeyeApiKey);
+    this.birdeye = new BirdeyeClient(); // DEPRECATED - stub only
     this.jupiter = new JupiterClient(merged.jupiterApiUrl);
     this.solana = new SolanaRpcClient(merged.solanaRpcUrl);
     this.ethereum = new EthereumRpcClient(merged.ethereumRpcUrl);
     // DexPaprika - 35 chains, free, no API key needed
-    // Lazy import to avoid circular dependency issues
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DexPaprikaClient } = require('./dexpaprika-client');
     this.dexpaprika = new DexPaprikaClient();
-    // CoinGecko - PRIMARY free data source for market data
+    // CoinGecko - PRIMARY free data source for market data (replaces Birdeye)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { CoinGeckoClient } = require('./coingecko-client');
     this.coingecko = new CoinGeckoClient(merged.coingeckoApiUrl);
-    // Birdeye is optional - only functional with API key
-    this.birdeyeApiKeyAvailable = !!merged.birdeyeApiKey;
   }
   
   /**
@@ -643,14 +522,12 @@ export class DataIngestionPipeline {
     // DexPaprika for 35-chain pool data with buy/sell ratios
     const dpPoolsPromise = this.dexpaprika.getPools(chainId, 50).catch(() => ({ pools: [], cursor: undefined }));
 
-    // Birdeye as optional fallback (only if API key is available)
-    const birdeyeTokensPromise = this.birdeyeApiKeyAvailable
-      ? this.birdeye.getTokenList('v24hUSD', 'desc', 50, chainId).catch(() => [])
-      : Promise.resolve([] as BirdeyePriceData[]);
+    // CoinGecko trending as supplementary source (replaces Birdeye)
+    const cgTrendingPromise = this.coingecko.getTrending().catch(() => []);
 
-    const [dexTokens, birdeyeTokens, dpPools] = await Promise.all([
+    const [dexTokens, cgTrending, dpPools] = await Promise.all([
       dexTokensPromise,
-      birdeyeTokensPromise,
+      cgTrendingPromise,
       dpPoolsPromise,
     ]);
 
@@ -666,13 +543,13 @@ export class DataIngestionPipeline {
       // DexScreener tokens (DEX-specific data)
       dexTokens: dexTokens.filter(t => t.chainId === chainId),
       // Birdeye tokens (optional, only if API key)
-      birdeyeTokens,
+      cgTrending,
       // DexPaprika pools
       dexpaprikaPools: dpPools.pools,
       // Counts
       totalCoinGeckoTokens: coinGeckoTokens.length,
       totalDexTokens: dexTokens.length,
-      totalBirdeyeTokens: birdeyeTokens.length,
+      totalCoinGeckoTrending: cgTrending.length,
       totalDexPaprikaPools: dpPools.pools.length,
     };
   }
@@ -698,9 +575,8 @@ export class DataIngestionPipeline {
         }
       }
       
-      // Enrich with Birdeye data
-      const birdeyeTx = await this.birdeye.getWalletTransactions(address, 50, 'solana');
-      transactions.push(...birdeyeTx);
+      // Birdeye is deprecated - no wallet enrichment available
+      // For wallet data, use Solana RPC or Helius API
       
       return {
         address,
@@ -833,6 +709,7 @@ export class DataIngestionPipeline {
 
   // Getters for individual clients
   getDexScreener() { return this.dexscreener; }
+  /** @deprecated Use getCoinGecko() instead - Birdeye is no longer supported */
   getBirdeye() { return this.birdeye; }
   getJupiter() { return this.jupiter; }
   getSolana() { return this.solana; }

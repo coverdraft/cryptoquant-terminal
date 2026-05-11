@@ -558,7 +558,7 @@ model PriceCandle {
   close         Float
   volume        Float
   trades        Int      @default(0)
-  source        String   @default("birdeye") // birdeye, dexscreener, internal
+  source        String   @default("coingecko") // coingecko, dexscreener, internal
 
   createdAt     DateTime @default(now())
 
@@ -1018,6 +1018,29 @@ model DecisionLog {
   createdAt              DateTime @default(now())
 
   @@map("decision_logs")
+}
+
+// ============================================================
+// SCHEDULER STATE - Persist Brain Scheduler State Across Restarts
+// ============================================================
+
+model SchedulerState {
+  id              String   @id @default(cuid())
+  status          String   @default("STOPPED")  // STOPPED, RUNNING, PAUSED, ERROR
+  config          String   @default("{}")       // JSON: SchedulerConfig
+  lastCycleNumber Int      @default(0)
+  totalCycles     Int      @default(0)
+  capitalUsd      Float    @default(10)
+  initialCapitalUsd Float  @default(10)
+  chain           String   @default("SOL")
+  scanLimit       Int      @default(250)
+  startedAt       DateTime?
+  stoppedAt       DateTime?
+  lastError       String?
+  taskStates      String   @default("{}")       // JSON: Map of task name -> lastRunAt, runCount, etc.
+  updatedAt       DateTime @updatedAt
+
+  @@map("scheduler_states")
 }
 
 model ProtocolData {

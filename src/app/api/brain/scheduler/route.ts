@@ -3,140 +3,23 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// In-memory scheduler state
-const schedulerState = {
-  status: 'STOPPED' as 'STOPPED' | 'RUNNING' | 'PAUSED',
-  startedAt: null as Date | null,
-  config: { capitalUsd: 10, initialCapitalUsd: 10, chain: 'SOL', scanLimit: 50 },
-  lastSyncAt: null as Date | null,
-  tokensSynced: 0,
-  cyclesCompleted: 0,
-  lastCycleResult: null as any,
-  cycleTimer: null as ReturnType<typeof setInterval> | null,
-};
-
 /**
- * Run a single brain cycle using the enhanced pipeline
+ * GET /api/brain/scheduler
+ * Returns current scheduler status from the brainScheduler singleton.
+ * Also loads persisted state from DB if scheduler is not running.
  */
-async function runCycle() {
-  try {
-    const { runBrainCycle } = await import('@/lib/services/brain-pipeline');
-    const result = await runBrainCycle({
-      capitalUsd: schedulerState.config.capitalUsd,
-      chain: schedulerState.config.chain,
-      scanLimit: schedulerState.config.scanLimit,
-      enableDexScreener: true,
-      enableSignals: true,
-      enablePatterns: true,
-      enableOHLCV: true,
-    });
-
-    schedulerState.cyclesCompleted++;
-    schedulerState.lastSyncAt = new Date();
-    schedulerState.lastCycleResult = result;
-
-    // Update capital based on cycle result
-    if (result.status === 'COMPLETED') {
-      schedulerState.config.capitalUsd = result.capitalAfterUsd;
-    }
-
-    console.log(`[Scheduler] Cycle #${schedulerState.cyclesCompleted} ${result.status}: ${result.tokensScanned} tokens, ${result.signalsGenerated} signals`);
-  } catch (err) {
-    console.error('[Scheduler] Cycle error:', err);
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    let body: any = {};
-    try { body = await request.json(); } catch { /* no body */ }
-
-    const { action, params } = body;
-
-    switch (action) {
-      case 'start': {
-        if (schedulerState.status === 'RUNNING') {
-          return NextResponse.json({ success: true, data: { started: false, message: 'Already running' } });
-        }
-
-        schedulerState.status = 'RUNNING';
-        schedulerState.startedAt = new Date();
-        if (params?.capitalUsd) schedulerState.config.capitalUsd = Number(params.capitalUsd);
-        if (params?.initialCapitalUsd) schedulerState.config.initialCapitalUsd = Number(params.initialCapitalUsd);
-        if (params?.chain) schedulerState.config.chain = params.chain;
-        if (params?.scanLimit) schedulerState.config.scanLimit = Number(params.scanLimit);
-
-        // Start periodic cycle (every 5 minutes)
-        if (schedulerState.cycleTimer) clearInterval(schedulerState.cycleTimer);
-
-        // Run first cycle immediately
-        runCycle().catch(err => console.error('[Scheduler] Initial cycle error:', err));
-
-        // Then every 5 minutes
-        schedulerState.cycleTimer = setInterval(() => {
-          if (schedulerState.status === 'RUNNING') {
-            runCycle().catch(err => console.error('[Scheduler] Cycle error:', err));
-          }
-        }, 5 * 60 * 1000);
-
-        return NextResponse.json({
-          success: true,
-          data: {
-            started: true,
-            message: `Brain started with $${schedulerState.config.capitalUsd}, cycles every 5 min`,
-            config: schedulerState.config,
-          },
-        });
-      }
-      case 'stop': {
-        schedulerState.status = 'STOPPED';
-        if (schedulerState.cycleTimer) {
-          clearInterval(schedulerState.cycleTimer);
-          schedulerState.cycleTimer = null;
-        }
-        return NextResponse.json({ success: true, data: { stopped: true, cyclesCompleted: schedulerState.cyclesCompleted } });
-      }
-      case 'pause': {
-        schedulerState.status = 'PAUSED';
-        return NextResponse.json({ success: true, data: { paused: true } });
-      }
-      case 'resume': {
-        schedulerState.status = 'RUNNING';
-        return NextResponse.json({ success: true, data: { resumed: true } });
-      }
-      case 'run_cycle': {
-        // Manual cycle trigger
-        await runCycle();
-        return NextResponse.json({
-          success: true,
-          data: {
-            cycleCompleted: true,
-            lastResult: {
-              tokensScanned: schedulerState.lastCycleResult?.tokensScanned ?? 0,
-              signalsGenerated: schedulerState.lastCycleResult?.signalsGenerated ?? 0,
-              signalBreakdown: schedulerState.lastCycleResult?.signalBreakdown ?? {},
-            },
-          },
-        });
-      }
-      case 'update_config': {
-        if (params?.capitalUsd) schedulerState.config.capitalUsd = Number(params.capitalUsd);
-        if (params?.chain) schedulerState.config.chain = params.chain;
-        if (params?.scanLimit) schedulerState.config.scanLimit = Number(params.scanLimit);
-        return NextResponse.json({ success: true, data: { message: 'Config updated', config: schedulerState.config } });
-      }
-      default:
-        return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
-    }
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-}
-
 export async function GET() {
   try {
+    const { brainScheduler } = await import('@/lib/services/brain-scheduler');
     const { db } = await import('@/lib/db');
 
+    // Get in-memory status from the singleton
+    const status = brainScheduler.getStatus();
+
+    // Also fetch persisted state for additional info (e.g., stoppedAt, previous runs)
+    const persistedState = await db.schedulerState.findUnique({ where: { id: 'main' } }).catch(() => null);
+
+    // DB stats
     const [tokens, candles, signals, predictiveSignals] = await Promise.all([
       db.token.count().catch(() => 0),
       db.priceCandle.count().catch(() => 0),
@@ -162,21 +45,31 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        status: schedulerState.status,
-        uptime: schedulerState.startedAt ? Date.now() - schedulerState.startedAt.getTime() : 0,
-        config: schedulerState.config,
-        lastSyncAt: schedulerState.lastSyncAt,
-        tokensSynced: schedulerState.tokensSynced,
-        cyclesCompleted: schedulerState.cyclesCompleted,
-        lastCycleResult: schedulerState.lastCycleResult ? {
-          tokensScanned: schedulerState.lastCycleResult.tokensScanned,
-          tokensEnriched: schedulerState.lastCycleResult.tokensEnriched,
-          tokensOperable: schedulerState.lastCycleResult.tokensOperable,
-          signalsGenerated: schedulerState.lastCycleResult.signalsGenerated,
-          signalBreakdown: schedulerState.lastCycleResult.signalBreakdown,
-          candlesStored: schedulerState.lastCycleResult.candlesStored,
-          status: schedulerState.lastCycleResult.status,
+        // From brainScheduler singleton (in-memory)
+        status: status.status,
+        uptime: status.uptime,
+        config: status.config,
+        tasks: status.tasks,
+        brainCycle: status.brainCycle,
+        capitalStrategy: status.capitalStrategy,
+        totalCyclesCompleted: status.totalCyclesCompleted,
+        lastError: status.lastError,
+
+        // From persisted state (survives restarts)
+        persisted: persistedState ? {
+          startedAt: persistedState.startedAt,
+          stoppedAt: persistedState.stoppedAt,
+          totalCycles: persistedState.totalCycles,
+          lastCycleNumber: persistedState.lastCycleNumber,
+          capitalUsd: persistedState.capitalUsd,
+          initialCapitalUsd: persistedState.initialCapitalUsd,
+          chain: persistedState.chain,
+          scanLimit: persistedState.scanLimit,
+          lastError: persistedState.lastError,
+          updatedAt: persistedState.updatedAt,
         } : null,
+
+        // DB stats
         dbStats: {
           tokens,
           candles,
@@ -193,6 +86,98 @@ export async function GET() {
         },
       },
     });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/brain/scheduler
+ * Controls the brain scheduler: start, stop, pause, resume, run_cycle, update_config
+ *
+ * Body: { action: string, params?: object }
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const { brainScheduler } = await import('@/lib/services/brain-scheduler');
+
+    let body: any = {};
+    try { body = await request.json(); } catch { /* no body */ }
+
+    const { action, params } = body;
+
+    switch (action) {
+      case 'start': {
+        const config: any = {};
+        if (params?.capitalUsd) config.capitalUsd = Number(params.capitalUsd);
+        if (params?.initialCapitalUsd) config.initialCapitalUsd = Number(params.initialCapitalUsd);
+        if (params?.chain) config.chain = params.chain;
+        if (params?.scanLimit) config.scanLimit = Number(params.scanLimit);
+
+        const result = await brainScheduler.start(
+          Object.keys(config).length > 0 ? config : undefined
+        );
+
+        return NextResponse.json({
+          success: true,
+          data: result,
+        });
+      }
+      case 'stop': {
+        const result = await brainScheduler.stop();
+        return NextResponse.json({ success: true, data: result });
+      }
+      case 'pause': {
+        const result = brainScheduler.pause();
+        // Persist the paused state
+        return NextResponse.json({ success: true, data: result });
+      }
+      case 'resume': {
+        const result = brainScheduler.resume();
+        return NextResponse.json({ success: true, data: result });
+      }
+      case 'run_cycle': {
+        // Manual cycle trigger
+        const result = await brainScheduler.runManualCycle();
+        return NextResponse.json({ success: true, data: result });
+      }
+      case 'update_config': {
+        const updates: any = {};
+        if (params?.capitalUsd) updates.capitalUsd = Number(params.capitalUsd);
+        if (params?.chain) updates.chain = params.chain;
+        if (params?.scanLimit) updates.scanLimit = Number(params.scanLimit);
+        brainScheduler.updateConfig(updates);
+        return NextResponse.json({
+          success: true,
+          data: { message: 'Config updated', config: brainScheduler.getConfig() },
+        });
+      }
+      case 'auto_start': {
+        // Check if scheduler was previously running and auto-start it
+        const previousState = await brainScheduler.getPreviousState();
+        if (previousState.wasRunning && previousState.config) {
+          const result = await brainScheduler.start(previousState.config);
+          return NextResponse.json({
+            success: true,
+            data: {
+              autoStarted: true,
+              ...result,
+              previousState: {
+                startedAt: previousState.state?.startedAt,
+                totalCycles: previousState.state?.totalCycles,
+                capitalUsd: previousState.state?.capitalUsd,
+              },
+            },
+          });
+        }
+        return NextResponse.json({
+          success: true,
+          data: { autoStarted: false, message: 'Scheduler was not previously running' },
+        });
+      }
+      default:
+        return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+    }
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

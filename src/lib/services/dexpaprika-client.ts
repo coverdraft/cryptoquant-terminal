@@ -4,7 +4,7 @@
  * Hybrid data client that combines:
  *   - DexPaprika API: Token search across 35+ chains (FREE, no API key)
  *   - DexScreener API: Pool/pair data with buy/sell txn breakdowns
- *   - Birdeye API: OHLCV candle data (fallback)
+ *   - CoinGecko API: OHLCV candle data (free, no API key)
  *
  * Data routing:
  *   - Token search → DexPaprika /search endpoint
@@ -13,7 +13,7 @@
  *   - Top pools → DexScreener token pair lookup
  *   - Buy/sell pressure → DexScreener txn data (h24/h6/h1 buys/sells)
  *   - Pool swaps → Simulated from DexScreener txn counts
- *   - OHLCV → Birdeye public API
+ *   - OHLCV → CoinGecko API (free, no API key)
  *   - Smart money → Requires on-chain data (returns empty)
  *   - Cross-chain search → DexPaprika search + DexScreener pool lookup
  *
@@ -272,24 +272,18 @@ interface DexScreenerPair {
 
 const DEXPAPRIKA_BASE_URL = 'https://api.dexpaprika.com';
 const DEXSCREENER_BASE_URL = 'https://api.dexscreener.com';
-const BIRDEYE_BASE_URL = 'https://public-api.birdeye.so';
+// Birdeye removed - using CoinGecko for OHLCV
 const SOURCE = 'dexpaprika';
 const SOURCE_DS = 'dexscreener';
+const SOURCE_CG = 'coingecko';
 
-/** Map internal timeframes to Birdeye API format */
-const BIRDEYE_TF_MAP: Record<string, string> = {
-  '1m': '1m',
-  '3m': '3m',
-  '5m': '5m',
-  '15m': '15m',
-  '30m': '30m',
-  '1h': '1H',
-  '2h': '2H',
-  '4h': '4H',
-  '6h': '6H',
-  '12h': '12H',
-  '1d': '1D',
-  '1w': '1W',
+/** Map internal timeframes to CoinGecko days parameter */
+const COINGECKO_TF_DAYS: Record<string, number> = {
+  '30m': 1,
+  '1h': 1,
+  '4h': 7,
+  '1d': 30,
+  '1w': 90,
 };
 
 /** Map internal timeframes to duration in seconds */
@@ -357,16 +351,13 @@ const CHAIN_ID_MAP: Record<string, DexPaprikaChainId | string> = {
 export class DexPaprikaClient {
   private dexpaprikaBaseUrl: string;
   private dexscreenerBaseUrl: string;
-  private birdeyeBaseUrl: string;
 
   constructor(
     dexpaprikaBaseUrl: string = DEXPAPRIKA_BASE_URL,
     dexscreenerBaseUrl: string = DEXSCREENER_BASE_URL,
-    birdeyeBaseUrl: string = BIRDEYE_BASE_URL,
   ) {
     this.dexpaprikaBaseUrl = dexpaprikaBaseUrl;
     this.dexscreenerBaseUrl = dexscreenerBaseUrl;
-    this.birdeyeBaseUrl = birdeyeBaseUrl;
   }
 
   // ----------------------------------------------------------
@@ -822,44 +813,73 @@ export class DexPaprikaClient {
   }
 
   // ----------------------------------------------------------
-  // OHLCV (via Birdeye)
+  // OHLCV (via CoinGecko)
   // ----------------------------------------------------------
 
   /**
    * Get OHLCV candles for a pool.
    * Neither DexPaprika nor DexScreener provides OHLCV data,
-   * so this uses Birdeye's public API.
-   * Requires a token address (extracted from pool data).
+   * so this uses CoinGecko's free API (no API key needed).
+   * Resolves the token from the pool to a CoinGecko coin ID,
+   * then fetches OHLCV data.
    */
   async getOHLCV(
     chain: string,
     poolId: string,
     timeframe: string = '1h',
-    limit = 200,
+    _limit = 200,
   ): Promise<DexPaprikaOHLCV[]> {
     const dpChain = this.toDexPaprikaChain(chain);
-    const birdeyeTf = BIRDEYE_TF_MAP[timeframe] ?? '1H';
     const key = cacheKeyWithChain(
-      SOURCE, 'ohlcv', dpChain,
-      `${poolId}:${birdeyeTf}:${limit}`
+      SOURCE_CG, 'ohlcv', dpChain,
+      `${poolId}:${timeframe}`
     );
 
     return unifiedCache.getOrFetch(
       key,
       async () => {
         try {
-          // Get pool detail to find the base token address
+          // Get pool detail to find the base token symbol/name
           const pair = await this.fetchDexScreenerPair(dpChain, poolId);
           if (!pair) return [];
 
-          const tokenAddress = pair.baseToken.address;
-          return this.fetchBirdeyeOHLCV(tokenAddress, dpChain, birdeyeTf, limit);
+          const tokenSymbol = pair.baseToken.symbol;
+          const tokenName = pair.baseToken.name;
+
+          // Resolve to CoinGecko coin ID via search
+          const { coinGeckoClient } = await import('./coingecko-client');
+          const searchResults = await coinGeckoClient.searchTokens(tokenSymbol);
+          if (!searchResults || searchResults.length === 0) return [];
+
+          // Find best match by symbol
+          const match = searchResults.find(
+            c => c.symbol?.toLowerCase() === tokenSymbol.toLowerCase() ||
+                 c.name?.toLowerCase() === tokenName.toLowerCase()
+          ) ?? searchResults[0];
+
+          const coinId = match.id;
+
+          // Determine CoinGecko days parameter from timeframe
+          const days = COINGECKO_TF_DAYS[timeframe] ?? 7;
+
+          // Fetch OHLCV from CoinGecko
+          const cgCandles = await coinGeckoClient.getOHLCV(coinId, days);
+
+          // Convert CoinGecko format to DexPaprikaOHLCV format
+          return cgCandles.map(c => ({
+            timestamp: Math.floor(c.timestamp / 1000), // Convert ms to seconds
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: 0, // CoinGecko OHLCV doesn't include volume
+          }));
         } catch {
           // OHLCV may not be available for all pools
           return [];
         }
       },
-      SOURCE,
+      SOURCE_CG,
       60_000, // 1 min
     );
   }
@@ -1152,65 +1172,7 @@ export class DexPaprikaClient {
     );
   }
 
-  // ----------------------------------------------------------
-  // PRIVATE: Birdeye API
-  // ----------------------------------------------------------
-
-  private async fetchBirdeyeOHLCV(
-    tokenAddress: string,
-    chain: string,
-    birdeyeTf: string,
-    limit: number,
-  ): Promise<DexPaprikaOHLCV[]> {
-    const key = cacheKeyWithChain('birdeye', 'ohlcv', chain, `${tokenAddress}:${birdeyeTf}:${limit}`);
-
-    return unifiedCache.getOrFetch(
-      key,
-      async () => {
-        const now = Math.floor(Date.now() / 1000);
-        const tfSeconds = TIMEFRAME_SECONDS[birdeyeTf.toLowerCase()] ?? 3600;
-        const timeFrom = now - limit * tfSeconds;
-
-        const url =
-          `${this.birdeyeBaseUrl}/defi/ohlcv` +
-          `?address=${tokenAddress}&type=${birdeyeTf}&time_from=${timeFrom}&time_to=${now}`;
-
-        const res = await fetch(url, {
-          headers: {
-            'Accept': 'application/json',
-            'X-API-KEY': 'public',
-            'x-chain': chain,
-          },
-        });
-
-        if (!res.ok) {
-          console.warn(`[DexPaprika] Birdeye OHLCV returned ${res.status}`);
-          return [];
-        }
-
-        const data = await res.json();
-        if (!data.success || !data.data?.items) return [];
-
-        return (data.data.items as Array<{
-          unixTime: number;
-          open: number;
-          high: number;
-          low: number;
-          close: number;
-          volume: number;
-        }>).map(item => ({
-          timestamp: item.unixTime,
-          open: item.open,
-          high: item.high,
-          low: item.low,
-          close: item.close,
-          volume: item.volume,
-        }));
-      },
-      'birdeye',
-      60_000, // 1 min
-    );
-  }
+  // Birdeye API section removed - CoinGecko is used for OHLCV instead
 
   // ----------------------------------------------------------
   // PRIVATE: Data mapping helpers

@@ -7,16 +7,14 @@ export const dynamic = 'force-dynamic'
 const KEYED_SOURCES: Record<string, string> = {
   moralis: 'MORALIS_API_KEY',
   helius: 'HELIUS_API_KEY',
-  coingecko: 'COINGECKO_API_KEY',
   etherscan: 'ETHERSCAN_API_KEY',
   sqd: 'SQD_API_KEY',
   dune: 'DUNE_API_KEY',
   footprint: 'FOOTPRINT_API_KEY',
-  birdeye: 'BIRDEYE_API_KEY',
 }
 
 // Data sources that are always available (no key required)
-const ALWAYS_AVAILABLE = ['dexscreener', 'defillama'] as const
+const ALWAYS_AVAILABLE = ['coingecko', 'dexscreener', 'defillama', 'dexpaprika'] as const
 
 export async function GET() {
   const timestamp = new Date().toISOString()

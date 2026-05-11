@@ -269,7 +269,7 @@ export class RealDataLoader {
 
     // Also try DexPaprika for tokens still without pairAddress
     try {
-      const { dexpaprikaClient } = await import('./dexpaprika-client');
+      const { dexPaprikaClient } = await import('./dexpaprika-client');
       const stillUnenriched = await db.token.findMany({
         where: { pairAddress: null, volume24h: { gt: 1000000 } },
         orderBy: { volume24h: 'desc' },
@@ -281,7 +281,7 @@ export class RealDataLoader {
 
         for (const token of stillUnenriched) {
           try {
-            const results = await dexpaprikaClient.searchPools({
+            const results = await dexPaprikaClient.searchPools({
               query: token.symbol,
               limit: 3,
             });

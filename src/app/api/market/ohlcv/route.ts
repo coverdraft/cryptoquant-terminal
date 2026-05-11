@@ -260,12 +260,12 @@ async function fetchOHLCVOnDemand(
     // If CoinGecko didn't work, try DexPaprika (for DEX tokens)
     if (totalStored === 0 && token?.pairAddress) {
       try {
-        const { dexpaprikaClient } = await import('@/lib/services/dexpaprika-client');
+        const { dexPaprikaClient } = await import('@/lib/services/dexpaprika-client');
         const chainNorm = token.chain === 'SOL' ? 'solana' :
           token.chain === 'ETH' ? 'ethereum' :
             token.chain === 'BASE' ? 'base' : token.chain.toLowerCase();
 
-        const dpOhlcv = await dexpaprikaClient.getOHLCV(
+        const dpOhlcv = await dexPaprikaClient.getOHLCV(
           chainNorm,
           token.pairAddress,
           timeframe,

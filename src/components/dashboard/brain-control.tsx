@@ -47,6 +47,19 @@ interface TaskStatus {
   isRunning: boolean;
 }
 
+interface PersistedState {
+  startedAt: string | null;
+  stoppedAt: string | null;
+  totalCycles: number;
+  lastCycleNumber: number;
+  capitalUsd: number;
+  initialCapitalUsd: number;
+  chain: string;
+  scanLimit: number;
+  lastError: string | null;
+  updatedAt: string;
+}
+
 interface SchedulerStatusReport {
   status: 'STOPPED' | 'STARTING' | 'RUNNING' | 'PAUSED' | 'ERROR';
   uptime: number;
@@ -74,6 +87,7 @@ interface SchedulerStatusReport {
   };
   totalCyclesCompleted: number;
   lastError: string | null;
+  persisted: PersistedState | null;
 }
 
 // ============================================================
@@ -461,16 +475,37 @@ export default function BrainControl() {
               <div className="flex flex-col items-center justify-center rounded-md border border-[#1e293b] bg-[#0d1117] p-2">
                 <span className="text-[9px] font-mono text-[#64748b] mb-1">CYCLES</span>
                 <span className="text-[12px] font-mono font-bold text-cyan-400">
-                  {data?.totalCyclesCompleted ?? '—'}
+                  {data?.totalCyclesCompleted ?? data?.persisted?.totalCycles ?? '—'}
                 </span>
               </div>
             </div>
+            {/* Persisted state info (shows even when stopped) */}
+            {data?.persisted && (
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                {/* First started at */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#0d1117] border border-[#1e293b]">
+                  <Clock className="h-2.5 w-2.5 text-[#475569] shrink-0" />
+                  <span className="text-[8px] font-mono text-[#64748b]">First Started</span>
+                  <span className="text-[9px] font-mono text-[#94a3b8] ml-auto">
+                    {data.persisted.startedAt ? timeAgo(data.persisted.startedAt) : 'Never'}
+                  </span>
+                </div>
+                {/* Last stopped at */}
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#0d1117] border border-[#1e293b]">
+                  <Square className="h-2.5 w-2.5 text-[#475569] shrink-0" />
+                  <span className="text-[8px] font-mono text-[#64748b]">Last Stopped</span>
+                  <span className="text-[9px] font-mono text-[#94a3b8] ml-auto">
+                    {data.persisted.stoppedAt ? timeAgo(data.persisted.stoppedAt) : '—'}
+                  </span>
+                </div>
+              </div>
+            )}
             {/* Last error */}
-            {data?.lastError && (
+            {(data?.lastError || data?.persisted?.lastError) && (
               <div className="mt-2 flex items-center gap-1.5 px-2 py-1 rounded bg-red-500/5 border border-red-500/20">
                 <AlertTriangle className="h-3 w-3 text-red-400 shrink-0" />
                 <span className="text-[9px] font-mono text-red-400 line-clamp-1">
-                  {data.lastError}
+                  {data?.lastError || data?.persisted?.lastError}
                 </span>
               </div>
             )}
