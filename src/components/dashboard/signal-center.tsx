@@ -39,6 +39,7 @@ interface DbSignal {
   priceTarget: number | null;
   tokenId: string | null;
   tokenSymbol: string | null;
+  tokenName?: string | null;
   chain: string | null;
   createdAt: string;
   metadata: Record<string, unknown> | null;
@@ -467,7 +468,7 @@ export function SignalCenter() {
         merged.push({
           id: ds.id,
           type: ds.type,
-          tokenSymbol: ds.tokenSymbol || ds.tokenId || '—',
+          tokenSymbol: ds.tokenSymbol || ds.tokenName || '—',
           chain: ds.chain || undefined,
           confidence: ds.confidence,
           direction: ds.direction,
@@ -487,7 +488,7 @@ export function SignalCenter() {
       merged.push({
         id: ws.id,
         type: ws.type,
-        tokenSymbol: ws.tokenSymbol || ws.tokenId || '—',
+        tokenSymbol: ws.tokenSymbol || '—',
         tokenPrice: ws.tokenPrice,
         chain: ws.chain || undefined,
         confidence: ws.confidence,

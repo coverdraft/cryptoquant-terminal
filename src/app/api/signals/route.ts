@@ -29,19 +29,30 @@ export async function GET(request: NextRequest) {
     });
 
     // Flatten token data so frontend gets tokenSymbol + chain directly
-    const mapped = signals.map(s => ({
-      id: s.id,
-      type: s.type,
-      tokenId: s.tokenId,
-      tokenSymbol: s.token?.symbol ?? null,
-      chain: s.token?.chain ?? null,
-      confidence: s.confidence,
-      direction: s.direction,
-      description: s.description,
-      priceTarget: s.priceTarget,
-      metadata: s.metadata,
-      createdAt: s.createdAt,
-    }));
+    // Extract symbol from description as fallback when token relation is missing
+    const mapped = signals.map(s => {
+      let symbol = s.token?.symbol ?? null;
+      if (!symbol && s.description) {
+        // Try to extract token symbol from the signal description
+        // Common patterns: "Rug pull risk: SYMBOL dropped...", "Breakout: SYMBOL up..."
+        const match = s.description.match(/:\s*([A-Z][A-Z0-9]{1,10})\s/);
+        if (match) symbol = match[1];
+      }
+      return {
+        id: s.id,
+        type: s.type,
+        tokenId: s.tokenId,
+        tokenSymbol: symbol,
+        tokenName: s.token?.name ?? null,
+        chain: s.token?.chain ?? null,
+        confidence: s.confidence,
+        direction: s.direction,
+        description: s.description,
+        priceTarget: s.priceTarget,
+        metadata: s.metadata,
+        createdAt: s.createdAt,
+      };
+    });
 
     return NextResponse.json({ signals: mapped });
   } catch (error) {

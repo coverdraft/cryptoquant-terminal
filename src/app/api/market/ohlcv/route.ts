@@ -33,9 +33,10 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const tokenAddress = searchParams.get('tokenAddress') || '';
-    const timeframe = searchParams.get('timeframe') || '4h';
+    const timeframe = searchParams.get('timeframe') || '1h';
     const limit = Math.min(parseInt(searchParams.get('limit') || '200', 10), 1000);
     const forceRefresh = searchParams.get('refresh') === 'true';
+    const chain = searchParams.get('chain') || '';
 
     if (!tokenAddress) {
       return NextResponse.json(
@@ -46,10 +47,12 @@ export async function GET(request: NextRequest) {
 
     // Resolve tokenAddress: if it looks like a CUID (DB id), look up the actual address
     let resolvedAddress = tokenAddress;
+    let resolvedChain = chain || '';
     if (tokenAddress.startsWith('cl') || tokenAddress.startsWith('cm')) {
       const token = await db.token.findUnique({ where: { id: tokenAddress } });
       if (token) {
         resolvedAddress = token.address;
+        resolvedChain = token.chain || resolvedChain;
       }
     }
 
