@@ -330,7 +330,7 @@ function ConfigRow({ label, value, tooltip }: { label: string; value: string | n
 // ============================================================
 
 function TemplateCard({ template, onSelect }: { template: TradingSystemTemplate; onSelect: (t: TradingSystemTemplate) => void }) {
-  const risk = RISK_COLORS[template.riskLevel];
+  const risk = RISK_COLORS[template.riskLevel] || RISK_COLORS.MEDIUM;
   const cat = getCategoryByCategory(template.category);
 
   return (
@@ -852,7 +852,8 @@ export default function TradingSystemsLab() {
       const res = await fetch(`/api/trading-systems/templates?category=${getDbKeyForCategory(selectedCategory)}`);
       if (!res.ok) throw new Error('Failed to fetch templates');
       const json = await res.json();
-      return json.data as { category: Record<string, unknown> | null; templates: TradingSystemTemplate[] } | null;
+      // API returns nested: { data: { templates: [...] } } or { data: { grouped: {...} } }
+      return (json.data || json) as { category: Record<string, unknown> | null; templates?: TradingSystemTemplate[]; grouped?: Record<string, TradingSystemTemplate[]> } | null;
     },
     staleTime: 30000,
   });
@@ -900,7 +901,19 @@ export default function TradingSystemsLab() {
   }, [systemsData]);
 
   const templates: TradingSystemTemplate[] = useMemo(() => {
-    return templatesData?.templates || [];
+    if (!templatesData) return [];
+    // API returns { data: { templates: [...] } } when filtered by category
+    // or { data: { grouped: {...} } } when all categories
+    if (Array.isArray(templatesData.templates)) return templatesData.templates;
+    if (templatesData.grouped && typeof templatesData.grouped === 'object') {
+      // Flatten grouped templates
+      const allTemplates: TradingSystemTemplate[] = [];
+      for (const catTemplates of Object.values(templatesData.grouped)) {
+        if (Array.isArray(catTemplates)) allTemplates.push(...catTemplates);
+      }
+      return allTemplates;
+    }
+    return [];
   }, [templatesData]);
 
   const selectedSystem = useMemo(() => {

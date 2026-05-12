@@ -393,7 +393,16 @@ export function TraderIntelligencePanel() {
   // Selected trader detail — API only
   const selectedTrader: TraderDetail | null = useMemo(() => {
     if (traderDetailData?.trader) {
-      return traderDetailData.trader as TraderDetail;
+      // API returns { trader: {...}, derived: {...} }
+      const trader = traderDetailData.trader;
+      const derived = traderDetailData.derived || {
+        riskLevel: 'MEDIUM',
+        riskFactors: [],
+        profileSummary: '',
+        totalTransactions: trader._count?.transactions || 0,
+        totalHoldings: trader._count?.tokenHoldings || 0,
+      };
+      return { ...trader, derived } as TraderDetail;
     }
     if (!selectedTraderId) return null;
     return null;
