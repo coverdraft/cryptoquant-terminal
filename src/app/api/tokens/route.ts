@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     const chain = searchParams.get('chain') || 'ALL';
     const risk = searchParams.get('risk') || 'ALL';
     const sort = searchParams.get('sort') || 'volume';
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '500'), 2000);
     const trending = searchParams.get('trending') === 'true';
 
     let where: any = {};

@@ -7,7 +7,8 @@ import { queuedFetch } from '@/lib/request-queue';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3003';
 const SOCKET_CONNECTION_TIMEOUT = 10000; // 10s fallback threshold
-const REST_POLL_INTERVAL = 60000; // Fallback polling every 60s
+const REST_POLL_INTERVAL = 30000; // Fallback polling every 30s
+const REST_TOKEN_LIMIT = 500; // Load up to 500 tokens via REST (vs 50 before)
 
 /**
  * Map a WS-server token object to the store's TokenData shape.
@@ -57,7 +58,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
   // ─── REST fallback loader ────────────────────────────────────────
   const loadViaRest = useCallback(async () => {
     try {
-      const tokensRes = await queuedFetch('/api/tokens?limit=50');
+      const tokensRes = await queuedFetch(`/api/tokens?limit=${REST_TOKEN_LIMIT}`);
       const tokensData = await tokensRes.json();
 
       if (tokensData.tokens && tokensData.tokens.length > 0) {
@@ -73,6 +74,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             riskScore: t.dna?.riskScore ?? 50,
           }))
         );
+        console.log(`[WSProvider] Loaded ${tokensData.tokens.length} tokens from REST API`);
+      } else {
+        console.warn('[WSProvider] No tokens found in database - run seed script to populate data');
       }
 
       try {
@@ -111,7 +115,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       const shouldRefreshSummary = pollCount % 3 === 0;
 
       try {
-        const res = await queuedFetch('/api/tokens?limit=50');
+        const res = await queuedFetch(`/api/tokens?limit=${REST_TOKEN_LIMIT}`);
         const data = await res.json();
         if (data.tokens && data.tokens.length > 0) {
           setTokens(
@@ -206,7 +210,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on('connect_error', (err) => {
-      console.error('[WSProvider] Socket.IO connection error:', err.message);
+      // This is expected when WS server is not running — REST fallback handles it
+      if (!isUsingWsRef.current) {
+        console.warn('[WSProvider] Socket.IO unavailable (WS server not running?) — using REST fallback');
+      }
     });
 
     // ─── Initial data (sent once on connection) ───────────────────
