@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -142,7 +142,7 @@ const TIMEFRAMES = ['1m', '5m', '10m', '15m', '30m', '1h', '4h'];
 const TOKEN_AGES = ['NEW', 'MEDIUM', 'OLD'];
 const RISK_LEVELS = ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE'];
 
-type Step = 'setup' | 'scanning' | 'generating' | 'running' | 'results';
+type Step = 'setup' | 'scanning' | 'generating' | 'running' | 'results' | 'activate';
 
 // Pipeline node definitions
 const PIPELINE_NODES: { step: Step; emoji: string; label: string }[] = [
@@ -151,9 +151,10 @@ const PIPELINE_NODES: { step: Step; emoji: string; label: string }[] = [
   { step: 'generating', emoji: '⚡', label: 'Generate' },
   { step: 'running', emoji: '🔄', label: 'Backtest' },
   { step: 'results', emoji: '🏆', label: 'Rank' },
+  { step: 'activate', emoji: '🚀', label: 'Activate' },
 ];
 
-const STEP_ORDER: Step[] = ['setup', 'scanning', 'generating', 'running', 'results'];
+const STEP_ORDER: Step[] = ['setup', 'scanning', 'generating', 'running', 'results', 'activate'];
 
 const CATEGORY_COLORS: Record<string, string> = {
   momentum: '#f59e0b',
@@ -332,7 +333,7 @@ function StrategyCard({
             {strategy.timeframe}
           </Badge>
           <Badge className="text-[8px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
-            {strategy.tokenAgeCategory === 'NEW' ? '<24h' : strategy.tokenAgeCategory === 'MEDIUM' ? '<30d' : '>30d'}
+            {strategy.tokenAgeCategory === 'NEW' ? '<7d' : strategy.tokenAgeCategory === 'MEDIUM' ? '7-30d' : '>30d'}
           </Badge>
           <Badge className="text-[8px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
             ${strategy.capitalAllocation.toFixed(0)}
@@ -628,6 +629,55 @@ export default function AIStrategyOptimizer() {
     staleTime: 10000,
   });
 
+  // Polling for running backtests
+  const { data: backtestStatus } = useQuery({
+    queryKey: ['ai-manager-backtest-status', loopResults.map(r => r.backtestId).join(',')],
+    queryFn: async () => {
+      const ids = loopResults.filter(r => r.backtestId && r.status !== 'completed' && r.status !== 'failed').map(r => r.backtestId!);
+      if (ids.length === 0) return [];
+
+      const results = await Promise.allSettled(
+        ids.map(async (id) => {
+          const res = await fetch(`/api/backtest/${id}`);
+          if (!res.ok) return null;
+          const json = await res.json();
+          return json.data;
+        })
+      );
+      return results.filter(r => r.status === 'fulfilled' && r.value).map(r => (r as PromiseFulfilledResult<Record<string, unknown>>).value);
+    },
+    enabled: loopResults.some(r => r.status === 'running' || r.status === 'created'),
+    refetchInterval: 5000,
+  });
+
+  // When backtest status updates, patch loopResults and auto-trigger ranking
+  useEffect(() => {
+    if (!backtestStatus || !Array.isArray(backtestStatus) || backtestStatus.length === 0) return;
+
+    let hasNewlyCompleted = false;
+    setLoopResults(prev => {
+      let updated = prev;
+      backtestStatus.forEach((bt: Record<string, unknown>) => {
+        const btId = bt.id as string;
+        const btStatus = (bt.status as string || '').toLowerCase();
+        if (btStatus === 'completed' || btStatus === 'failed') {
+          const idx = updated.findIndex(r => r.backtestId === btId);
+          if (idx !== -1 && updated[idx].status !== 'completed' && updated[idx].status !== 'failed') {
+            hasNewlyCompleted = true;
+            updated = updated.map(r =>
+              r.backtestId === btId ? { ...r, status: btStatus } : r
+            );
+          }
+        }
+      });
+      return updated;
+    });
+
+    if (hasNewlyCompleted) {
+      refetchRank();
+    }
+  }, [backtestStatus, refetchRank]);
+
   // Mutations
   const generateMutation = useMutation({
     mutationFn: async () => {
@@ -730,14 +780,15 @@ export default function AIStrategyOptimizer() {
 
   const activateMutation = useMutation({
     mutationFn: async (strategy: BestStrategy) => {
-      const res = await fetch(`/api/trading-systems`, {
+      // Step 1: Create the trading system
+      const createRes = await fetch(`/api/trading-systems`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: `[AI] ${strategy.strategyName}`,
           category: strategy.category,
           config: {
-            assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<24H' : strategy.tokenAgeCategory === 'MEDIUM' ? '<30D' : '>30D' },
+            assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<7D' : strategy.tokenAgeCategory === 'MEDIUM' ? '7-30D' : '>30D' },
             phaseConfig: { genesis: strategy.tokenAgeCategory === 'NEW', early: true, growth: true, maturity: strategy.tokenAgeCategory === 'OLD', decline: false },
             entrySignal: { signalType: 'SMART_MONEY_ENTRY', confidenceThreshold: 70, confirmationRequired: true, timeWindow: 15 },
             execution: { orderType: 'LIMIT', slippageTolerance: 1.5, maxPositionSize: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5, executionDelay: 0 },
@@ -752,11 +803,21 @@ export default function AIStrategyOptimizer() {
           takeProfitPct: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25,
         }),
       });
-      if (!res.ok) throw new Error('Failed to activate');
-      return res.json();
+      if (!createRes.ok) throw new Error('Failed to create trading system');
+      const createData = await createRes.json();
+      const systemId = createData.data?.id || createData.id;
+
+      // Step 2: Activate in paper mode
+      const activateRes = await fetch(`/api/trading-systems/${systemId}/activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'paper' }),
+      });
+      if (!activateRes.ok) throw new Error('Failed to activate trading system');
+      return await activateRes.json();
     },
     onSuccess: () => {
-      toast.success('Strategy activated as trading system!');
+      toast.success('Strategy activated in Paper Trading mode');
       queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
     },
     onError: () => {
@@ -770,14 +831,15 @@ export default function AIStrategyOptimizer() {
       const toActivate = strategies.slice(0, count);
       const results = await Promise.allSettled(
         toActivate.map(async (strategy) => {
-          const res = await fetch(`/api/trading-systems`, {
+          // Step 1: Create the trading system
+          const createRes = await fetch(`/api/trading-systems`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: `[AI] ${strategy.strategyName}`,
               category: strategy.category,
               config: {
-                assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<24H' : strategy.tokenAgeCategory === 'MEDIUM' ? '<30D' : '>30D' },
+                assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<7D' : strategy.tokenAgeCategory === 'MEDIUM' ? '7-30D' : '>30D' },
                 phaseConfig: { genesis: strategy.tokenAgeCategory === 'NEW', early: true, growth: true, maturity: strategy.tokenAgeCategory === 'OLD', decline: false },
                 entrySignal: { signalType: 'SMART_MONEY_ENTRY', confidenceThreshold: 70, confirmationRequired: true, timeWindow: 15 },
                 execution: { orderType: 'LIMIT', slippageTolerance: 1.5, maxPositionSize: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5, executionDelay: 0 },
@@ -792,15 +854,25 @@ export default function AIStrategyOptimizer() {
               takeProfitPct: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25,
             }),
           });
-          if (!res.ok) throw new Error(`Failed to activate ${strategy.strategyName}`);
-          return res.json();
+          if (!createRes.ok) throw new Error(`Failed to create ${strategy.strategyName}`);
+          const createData = await createRes.json();
+          const systemId = createData.data?.id || createData.id;
+
+          // Step 2: Activate in paper mode
+          const activateRes = await fetch(`/api/trading-systems/${systemId}/activate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'paper' }),
+          });
+          if (!activateRes.ok) throw new Error(`Failed to activate ${strategy.strategyName}`);
+          return await activateRes.json();
         })
       );
       const succeeded = results.filter(r => r.status === 'fulfilled').length;
       return { succeeded, total: toActivate.length };
     },
     onSuccess: ({ succeeded, total }) => {
-      toast.success(`🚀 Activated ${succeeded}/${total} strategies!`);
+      toast.success(`🚀 Activated ${succeeded}/${total} strategies in Paper Trading mode!`);
       queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
     },
     onError: () => {
@@ -1012,6 +1084,7 @@ export default function AIStrategyOptimizer() {
       if (step === 'generating' && generateMutation.isPending) return 'active';
       if (step === 'running' && runLoopMutation.isPending) return 'active';
       if (step === 'results' && rankLoading) return 'active';
+      if (step === 'activate' && (activateMutation.isPending || activateAllMutation.isPending)) return 'active';
       return 'done';
     }
     return 'idle';
@@ -1087,29 +1160,6 @@ export default function AIStrategyOptimizer() {
                   isLast={i === PIPELINE_NODES.length - 1}
                 />
               ))}
-              {/* Activate node */}
-              <div className="flex items-center">
-                <div className="relative w-8 h-px mx-1 flex items-center">
-                  <div className={`w-full h-px ${currentStep === 'results' && bestStrategies.length > 0 ? 'bg-[#d4af37]/50' : 'bg-[#1e293b]'}`} />
-                </div>
-                <motion.div
-                  className="flex flex-col items-center gap-1"
-                  animate={{ scale: currentStep === 'results' && bestStrategies.length > 0 ? 1.05 : 1 }}
-                >
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-base border-2 transition-all duration-300 ${
-                    bestStrategies.length > 0
-                      ? 'bg-[#d4af37]/20 border-[#d4af37]/60 shadow-lg shadow-[#d4af37]/20'
-                      : 'bg-[#111827] border-[#1e293b]'
-                  }`}>
-                    <span>🚀</span>
-                  </div>
-                  <span className={`text-[9px] font-mono font-semibold tracking-wider ${
-                    bestStrategies.length > 0 ? 'text-[#d4af37]' : 'text-[#475569]'
-                  }`}>
-                    ACTIVATE
-                  </span>
-                </motion.div>
-              </div>
             </div>
           </div>
 
@@ -1211,7 +1261,7 @@ export default function AIStrategyOptimizer() {
                             : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
                         }`}
                       >
-                        {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
+                        {age === 'NEW' ? '<7d' : age === 'MEDIUM' ? '7-30d' : '>30d'}
                       </button>
                     ))}
                   </div>
@@ -1571,7 +1621,7 @@ export default function AIStrategyOptimizer() {
                         filterTokenAge === age ? 'bg-cyan-600/15 text-cyan-400 border-cyan-500/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
                       }`}
                     >
-                      {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
+                      {age === 'NEW' ? '<7d' : age === 'MEDIUM' ? '7-30d' : '>30d'}
                     </button>
                   ))}
                 </div>

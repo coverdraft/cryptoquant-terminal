@@ -1060,3 +1060,30 @@ model ProtocolData {
 
   @@map("protocol_data")
 }
+
+// ============================================================
+// AI BEST STRATEGY - Strategy Optimizer Hall of Fame
+// ============================================================
+
+model AIBestStrategy {
+  id                String   @id @default(cuid())
+  strategyName      String
+  category          String
+  timeframe         String
+  tokenAgeCategory  String
+  riskTolerance     String
+  capitalAllocation Float    @default(0)
+  pnlPct            Float    @default(0)
+  pnlUsd            Float    @default(0)
+  sharpeRatio       Float    @default(0)
+  winRate           Float    @default(0)
+  maxDrawdownPct    Float    @default(0)
+  profitFactor      Float    @default(0)
+  totalTrades       Int      @default(0)
+  avgHoldTimeMin    Float    @default(0)
+  score             Float    @default(0)
+  backtestId        String?  @unique
+  isActive          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}

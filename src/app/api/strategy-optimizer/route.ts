@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { dexScreenerClient } from '@/lib/services/dexscreener-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,11 +84,187 @@ interface RankResult {
 
 function getTokenAgeCategory(createdAt: Date): 'NEW' | 'MEDIUM' | 'OLD' {
   const ageMs = Date.now() - createdAt.getTime();
-  const ageHours = ageMs / (1000 * 60 * 60);
-  if (ageHours < 24) return 'NEW';
-  const ageDays = ageHours / 24;
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  if (ageDays < 7) return 'NEW';
   if (ageDays < 30) return 'MEDIUM';
   return 'OLD';
+}
+
+// Calculate token age category from creation timestamp (ms epoch)
+function getTokenAgeFromTimestamp(createdAtMs: number | null): 'NEW' | 'MEDIUM' | 'OLD' {
+  if (!createdAtMs) return 'MEDIUM'; // Default if unknown
+  const ageMs = Date.now() - createdAtMs;
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  if (ageDays < 7) return 'NEW';
+  if (ageDays < 30) return 'MEDIUM';
+  return 'OLD';
+}
+
+// ============================================================
+// DEXSCREENER TYPES & HELPERS
+// ============================================================
+
+interface DexScreenerToken {
+  address: string;
+  symbol: string;
+  name: string;
+  chain: string;
+  priceUsd: number;
+  volume24h: number;
+  liquidity: number;
+  marketCap: number;
+  priceChange24h: number;
+  pairCreatedAt: number | null;
+}
+
+/**
+ * Fetch trending tokens from DexScreener API.
+ * Uses the search endpoint for fresh pair data with volume/liquidity metrics,
+ * and the token-boosts endpoint for trending token discovery.
+ * Returns tokens filtered by volume24h > 10000 and liquidity > 5000.
+ */
+async function fetchDexScreenerTokens(): Promise<DexScreenerToken[]> {
+  try {
+    const tokens: DexScreenerToken[] = [];
+    const seenAddresses = new Set<string>();
+
+    // 1. Fetch search results for popular chains (full pair data in one call)
+    const searchQueries = ['solana', 'ethereum', 'base'];
+    const searchResults = await Promise.allSettled(
+      searchQueries.map(q =>
+        fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`, {
+          next: { revalidate: 60 }, // Cache for 60 seconds
+          signal: AbortSignal.timeout(15000),
+        })
+      )
+    );
+
+    for (const result of searchResults) {
+      if (result.status !== 'fulfilled' || !result.value.ok) continue;
+      try {
+        const data = await result.value.json();
+        const pairs = data.pairs || [];
+
+        for (const pair of pairs) {
+          if (!pair.baseToken?.address) continue;
+          const addr = pair.baseToken.address;
+          if (seenAddresses.has(addr)) continue;
+
+          const volume24h = pair.volume?.h24 || 0;
+          const liquidity = pair.liquidity?.usd || 0;
+
+          if (volume24h < 10000 || liquidity < 5000) continue;
+
+          seenAddresses.add(addr);
+          tokens.push({
+            address: addr,
+            symbol: pair.baseToken.symbol || 'UNKNOWN',
+            name: pair.baseToken.name || 'Unknown',
+            chain: pair.chainId || 'unknown',
+            priceUsd: parseFloat(pair.priceUsd || '0'),
+            volume24h,
+            liquidity,
+            marketCap: pair.marketCap || pair.fdv || 0,
+            priceChange24h: pair.priceChange?.h24 || 0,
+            pairCreatedAt: pair.pairCreatedAt || null,
+          });
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    // 2. Fetch boosted/trending tokens and enrich with pair data
+    try {
+      const boostRes = await fetch('https://api.dexscreener.com/token-boosts/top/v1', {
+        next: { revalidate: 60 },
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (boostRes.ok) {
+        const boostedTokens = await boostRes.json();
+        // Filter to tokens not already found via search, limit to 5 to avoid excessive API calls
+        const toEnrich = (Array.isArray(boostedTokens) ? boostedTokens : [])
+          .filter((bt: Record<string, unknown>) => bt.tokenAddress && !seenAddresses.has(bt.tokenAddress as string))
+          .slice(0, 5);
+
+        // Fetch pair data for boosted tokens using the existing client (has rate limiting)
+        for (const bt of toEnrich) {
+          try {
+            const pairs = await dexScreenerClient.searchTokenPairs(bt.tokenAddress as string);
+            if (pairs.length === 0) continue;
+
+            // Sort by liquidity (highest first)
+            pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+            const best = pairs[0];
+
+            const volume24h = best.volume?.h24 || 0;
+            const liquidity = best.liquidity?.usd || 0;
+            if (volume24h < 10000 || liquidity < 5000) continue;
+
+            seenAddresses.add(bt.tokenAddress as string);
+            tokens.push({
+              address: bt.tokenAddress as string,
+              symbol: best.baseToken?.symbol || 'UNKNOWN',
+              name: best.baseToken?.name || 'Unknown',
+              chain: best.chainId || (bt.chainId as string) || 'unknown',
+              priceUsd: parseFloat(best.priceUsd || '0'),
+              volume24h,
+              liquidity,
+              marketCap: best.marketCap || best.fdv || 0,
+              priceChange24h: best.priceChange?.h24 || 0,
+              pairCreatedAt: best.pairCreatedAt || null,
+            });
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch {
+      // Boosted tokens fetch failed, continue with search results only
+    }
+
+    // Sort by volume descending
+    tokens.sort((a, b) => b.volume24h - a.volume24h);
+
+    return tokens;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Calculate a risk score for a DexScreener token based on available metrics.
+ * Higher scores indicate higher risk.
+ * Scale: 0-100
+ */
+function calculateDexRiskScore(token: DexScreenerToken): number {
+  let risk = 50; // Base risk
+
+  // Lower liquidity = higher risk
+  if (token.liquidity < 10000) risk += 20;
+  else if (token.liquidity < 50000) risk += 10;
+  else if (token.liquidity > 500000) risk -= 10;
+
+  // Lower market cap = higher risk
+  if (token.marketCap < 50000) risk += 15;
+  else if (token.marketCap < 500000) risk += 5;
+  else if (token.marketCap > 10000000) risk -= 10;
+
+  // Newer tokens are riskier
+  const ageCategory = getTokenAgeFromTimestamp(token.pairCreatedAt);
+  if (ageCategory === 'NEW') risk += 15;
+  else if (ageCategory === 'OLD') risk -= 5;
+
+  // Extreme price changes indicate volatility/risk
+  if (Math.abs(token.priceChange24h) > 100) risk += 10;
+  else if (Math.abs(token.priceChange24h) > 50) risk += 5;
+
+  // Low volume relative to market cap is suspicious
+  if (token.marketCap > 0 && token.volume24h / token.marketCap < 0.01) risk += 10;
+
+  // Clamp to 0-100
+  return Math.max(0, Math.min(100, risk));
 }
 
 function getDnaRiskLevel(riskScore: number): 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME' {
@@ -136,8 +313,21 @@ export async function POST(request: NextRequest) {
 
 async function handleScan(_body: Record<string, unknown>) {
   try {
-    // Fetch tokens with DNA and signals
-    const tokens = await db.token.findMany({
+    // ============================================================
+    // STEP 1: Fetch fresh tokens from DexScreener API
+    // ============================================================
+    let dexTokens: DexScreenerToken[] = [];
+    try {
+      dexTokens = await fetchDexScreenerTokens();
+      console.log(`[Scan] DexScreener: fetched ${dexTokens.length} trending tokens`);
+    } catch (error) {
+      console.warn('[Scan] DexScreener fetch failed, falling back to DB-only:', error);
+    }
+
+    // ============================================================
+    // STEP 2: Fetch tokens from local DB with DNA and signals
+    // ============================================================
+    const dbTokens = await db.token.findMany({
       take: 100,
       orderBy: { volume24h: 'desc' },
       include: {
@@ -162,38 +352,92 @@ async function handleScan(_body: Record<string, unknown>) {
     // Get behavior model count
     const behaviorModelCount = await db.traderBehaviorModel.count();
 
-    // Process tokens into candidates
-    const candidates: TokenCandidate[] = tokens
-      .filter(t => t.volume24h > 0)
-      .map(token => {
-        const dna = token.dna;
-        const lifecycle = token.lifecycleStates[0];
-        const signalCount = token.signals.length;
-        const phase = lifecycle?.phase || null;
+    // ============================================================
+    // STEP 3: Merge DexScreener tokens with DB tokens
+    // ============================================================
+    const candidates: TokenCandidate[] = [];
+    const seenAddresses = new Set<string>();
 
-        // Count phase distribution
-        const ageCategory = getTokenAgeCategory(token.createdAt);
+    // 3a. Process DB tokens first (they get priority - have DNA, signals, lifecycle)
+    for (const token of dbTokens) {
+      if (token.volume24h <= 0) continue;
 
-        return {
-          id: token.id,
-          symbol: token.symbol,
-          name: token.name,
-          address: token.address,
-          chain: token.chain,
-          priceUsd: token.priceUsd,
-          volume24h: token.volume24h,
-          liquidity: token.liquidity,
-          marketCap: token.marketCap,
-          priceChange24h: token.priceChange24h,
-          riskScore: dna?.riskScore ?? 50,
-          phase,
-          dnaRiskLevel: getDnaRiskLevel(dna?.riskScore ?? 50),
-          smartMoneyPct: dna?.smartMoneyScore ?? 0,
-          botActivityPct: dna?.botActivityScore ?? 0,
-          signalCount,
-          tokenAgeCategory: ageCategory,
-        };
+      seenAddresses.add(token.address.toLowerCase());
+
+      const dna = token.dna;
+      const lifecycle = token.lifecycleStates[0];
+      const signalCount = token.signals.length;
+      const phase = lifecycle?.phase || null;
+      const ageCategory = getTokenAgeCategory(token.createdAt);
+
+      // Check if DexScreener has fresher data for this token
+      const dexMatch = dexTokens.find(
+        dt => dt.address.toLowerCase() === token.address.toLowerCase()
+      );
+
+      // Use DexScreener data for market metrics if available (fresher), DB for DNA/signals
+      const priceUsd = dexMatch?.priceUsd ?? token.priceUsd;
+      const volume24h = dexMatch?.volume24h ?? token.volume24h;
+      const liquidity = dexMatch?.liquidity ?? token.liquidity;
+      const marketCap = dexMatch?.marketCap ?? token.marketCap;
+      const priceChange24h = dexMatch?.priceChange24h ?? token.priceChange24h;
+      const tokenAgeCategory = dexMatch?.pairCreatedAt
+        ? getTokenAgeFromTimestamp(dexMatch.pairCreatedAt)
+        : ageCategory;
+
+      candidates.push({
+        id: token.id,
+        symbol: token.symbol,
+        name: token.name,
+        address: token.address,
+        chain: token.chain,
+        priceUsd,
+        volume24h,
+        liquidity,
+        marketCap,
+        priceChange24h,
+        riskScore: dna?.riskScore ?? 50,
+        phase,
+        dnaRiskLevel: getDnaRiskLevel(dna?.riskScore ?? 50),
+        smartMoneyPct: dna?.smartMoneyScore ?? 0,
+        botActivityPct: dna?.botActivityScore ?? 0,
+        signalCount,
+        tokenAgeCategory,
       });
+    }
+
+    // 3b. Add DexScreener-only tokens (not in DB)
+    for (const dexToken of dexTokens) {
+      if (seenAddresses.has(dexToken.address.toLowerCase())) continue;
+
+      seenAddresses.add(dexToken.address.toLowerCase());
+
+      const riskScore = calculateDexRiskScore(dexToken);
+      const ageCategory = getTokenAgeFromTimestamp(dexToken.pairCreatedAt);
+
+      candidates.push({
+        id: `dex-${dexToken.address.slice(0, 12)}`,
+        symbol: dexToken.symbol,
+        name: dexToken.name,
+        address: dexToken.address,
+        chain: dexToken.chain.toUpperCase(),
+        priceUsd: dexToken.priceUsd,
+        volume24h: dexToken.volume24h,
+        liquidity: dexToken.liquidity,
+        marketCap: dexToken.marketCap,
+        priceChange24h: dexToken.priceChange24h,
+        riskScore,
+        phase: null, // No lifecycle data from DexScreener
+        dnaRiskLevel: getDnaRiskLevel(riskScore),
+        smartMoneyPct: 0, // No DNA data from DexScreener
+        botActivityPct: 0, // No bot data from DexScreener
+        signalCount: 0, // No signal data from DexScreener
+        tokenAgeCategory: ageCategory,
+      });
+    }
+
+    // Sort merged candidates by volume (descending)
+    candidates.sort((a, b) => b.volume24h - a.volume24h);
 
     // Phase distribution
     const lifecyclePhases: Record<string, number> = {};
@@ -205,7 +449,7 @@ async function handleScan(_body: Record<string, unknown>) {
 
     const result: ScanResult = {
       tokens: candidates,
-      dnaProfiles: tokens.filter(t => t.dna).length,
+      dnaProfiles: dbTokens.filter(t => t.dna).length,
       activeSignals: activePredictiveSignals,
       lifecyclePhases,
       behaviorModels: behaviorModelCount,
@@ -272,7 +516,7 @@ async function handleGenerateStrategies(body: Record<string, unknown>) {
         if (strategies.length >= strategyCount) break;
 
         strategyId++;
-        const tokenAgeLabel = tokenAge === 'NEW' ? '<24h' : tokenAge === 'MEDIUM' ? '<30d' : '>30d';
+        const tokenAgeLabel = tokenAge === 'NEW' ? '<7d' : tokenAge === 'MEDIUM' ? '<30d' : '>30d';
 
         strategies.push({
           id: `strategy-${strategyId}`,
@@ -288,7 +532,7 @@ async function handleGenerateStrategies(body: Record<string, unknown>) {
               minLiquidity: tokenAge === 'NEW' ? 10000 : tokenAge === 'MEDIUM' ? 50000 : 100000,
               minVolume24h: tokenAge === 'NEW' ? 5000 : 20000,
               maxMarketCap: tokenAge === 'NEW' ? 1000000 : tokenAge === 'MEDIUM' ? 10000000 : 100000000,
-              tokenAge: tokenAge === 'NEW' ? '<24H' : tokenAge === 'MEDIUM' ? '<30D' : '>30D',
+              tokenAge: tokenAge === 'NEW' ? '<7D' : tokenAge === 'MEDIUM' ? '<30D' : '>30D',
               chains: ['SOL', 'ETH', 'BASE'],
             },
             phaseConfig: {
@@ -340,11 +584,23 @@ async function handleGenerateStrategies(body: Record<string, unknown>) {
 
 // ============================================================
 // RUN_LOOP - Execute optimization loop (create + run backtests)
+// Directly calls the backtesting engine instead of HTTP self-fetch
 // ============================================================
 
 async function handleRunLoop(body: Record<string, unknown>) {
   const strategies = (body.strategies as StrategyConfig[]) || [];
   const capital = Number(body.capital) || 10000;
+
+  // Dynamic imports to avoid cold-start overhead when not needed
+  const bteModule = await import('@/lib/services/backtesting-engine');
+  const backtestingEngine = bteModule.backtestingEngine;
+  type BacktestConfig = import('@/lib/services/backtesting-engine').BacktestConfig;
+
+  const tseModule = await import('@/lib/services/trading-system-engine');
+  const tradingSystemEngine = tseModule.tradingSystemEngine;
+
+  const bdbModule = await import('@/lib/services/backtest-data-bridge');
+  const backtestDataBridge = bdbModule.backtestDataBridge;
 
   const results: Array<{
     strategyId: string;
@@ -361,7 +617,6 @@ async function handleRunLoop(body: Record<string, unknown>) {
   });
 
   if (!defaultSystem) {
-    // Create a default adaptive system
     defaultSystem = await db.tradingSystem.create({
       data: {
         name: 'AI Optimizer - Adaptive',
@@ -385,9 +640,10 @@ async function handleRunLoop(body: Record<string, unknown>) {
     });
   }
 
+  // Run strategies SEQUENTIALLY to avoid overloading the DB
   for (const strategy of strategies) {
     try {
-      // Create a trading system for this strategy configuration
+      // 1. Create a TradingSystem record in the DB
       const system = await db.tradingSystem.create({
         data: {
           name: strategy.name,
@@ -411,9 +667,10 @@ async function handleRunLoop(body: Record<string, unknown>) {
         },
       });
 
-      // Create a backtest run
+      // 2. Create a BacktestRun record with status RUNNING
       const periodStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
       const periodEnd = new Date();
+      const initialCapital = strategy.capitalAllocation || capital / strategies.length;
 
       const backtest = await db.backtestRun.create({
         data: {
@@ -421,19 +678,20 @@ async function handleRunLoop(body: Record<string, unknown>) {
           mode: 'HISTORICAL',
           periodStart,
           periodEnd,
-          initialCapital: strategy.capitalAllocation || capital / strategies.length,
+          initialCapital,
           allocationMethod: 'KELLY_MODIFIED',
           capitalAllocation: JSON.stringify({
             method: 'KELLY_MODIFIED',
-            initialCapital: strategy.capitalAllocation || capital / strategies.length,
+            initialCapital,
             strategyId: strategy.id,
             strategyName: strategy.name,
             timeframe: strategy.timeframe,
             tokenAgeCategory: strategy.tokenAgeCategory,
             riskTolerance: strategy.riskTolerance,
           }),
-          status: 'PENDING',
-          progress: 0,
+          status: 'RUNNING',
+          progress: 0.05,
+          startedAt: new Date(),
         },
       });
 
@@ -441,37 +699,235 @@ async function handleRunLoop(body: Record<string, unknown>) {
         strategyId: strategy.id,
         strategyName: strategy.name,
         backtestId: backtest.id,
-        status: 'created',
+        status: 'running',
       });
-    } catch (error) {
-      results.push({
-        strategyId: strategy.id,
-        strategyName: strategy.name,
-        backtestId: null,
-        status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }
 
-  // Now try to run the created backtests
-  for (const result of results) {
-    if (result.backtestId && result.status === 'created') {
-      try {
-        // Trigger the run endpoint internally
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        const runRes = await fetch(`${baseUrl}/api/backtest/${result.backtestId}/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+      // 3. Build a system template from the trading system engine
+      const systemTemplate = tradingSystemEngine.getTemplate(system.name) ??
+        tradingSystemEngine.createSystemFromTemplate(
+          tradingSystemEngine.getAllTemplateNames()[0],
+          {
+            name: system.name,
+            category: system.category as 'ALPHA_HUNTER',
+          },
+        );
+
+      // 4. Load token data via backtestDataBridge
+      const tokenData = await backtestDataBridge.loadTokensForBacktest({
+        startDate: periodStart,
+        endDate: periodEnd,
+        timeframe: systemTemplate.primaryTimeframe,
+        chain: system.primaryTimeframe ? undefined : 'SOL',
+        minCandles: 20,
+        assetFilter: systemTemplate.assetFilter,
+        maxTokens: 10,
+        includeMetrics: true,
+      });
+
+      // Update progress after data load
+      await db.backtestRun.update({
+        where: { id: backtest.id },
+        data: { progress: 0.2 },
+      });
+
+      if (tokenData.length === 0) {
+        // No data available — complete with zero trades
+        await db.backtestRun.update({
+          where: { id: backtest.id },
+          data: {
+            status: 'COMPLETED',
+            progress: 1,
+            completedAt: new Date(),
+            finalCapital: initialCapital,
+            totalPnl: 0,
+            totalPnlPct: 0,
+            errorLog: 'No token data available for backtesting. Run OHLCV backfill first.',
+          },
         });
 
-        if (runRes.ok) {
-          result.status = 'running';
-        } else {
-          result.status = 'created'; // Created but not yet running
+        // Update the result status
+        const resultEntry = results.find(r => r.backtestId === backtest.id);
+        if (resultEntry) resultEntry.status = 'completed';
+        continue;
+      }
+
+      // 5. Build BacktestConfig and run the backtesting engine
+      const btConfig: BacktestConfig = {
+        system: systemTemplate,
+        mode: 'HISTORICAL',
+        startDate: periodStart,
+        endDate: periodEnd,
+        initialCapital,
+        feesPct: 0.003,
+        slippagePct: 0.5,
+        applySlippage: true,
+        enforcePhaseFilter: true,
+      };
+
+      await db.backtestRun.update({
+        where: { id: backtest.id },
+        data: { progress: 0.3 },
+      });
+
+      const result = await backtestingEngine.runBacktest(
+        btConfig,
+        tokenData,
+        async (progress) => {
+          if (progress.barsProcessed % 500 === 0) {
+            try {
+              await db.backtestRun.update({
+                where: { id: backtest.id },
+                data: {
+                  progress: Math.min(0.9, 0.3 + progress.percentComplete * 0.006),
+                },
+              });
+            } catch {
+              // Progress update failures are non-critical
+            }
+          }
+        },
+      );
+
+      await db.backtestRun.update({
+        where: { id: backtest.id },
+        data: { progress: 0.9 },
+      });
+
+      // 6. Create BacktestOperation records for each trade
+      const operationCreates = result.trades.map((trade) => ({
+        backtestId: backtest.id,
+        systemId: system.id,
+        tokenAddress: trade.tokenAddress,
+        tokenSymbol: trade.symbol,
+        chain: 'solana',
+        tokenPhase: trade.phase,
+        tokenAgeMinutes: 0,
+        marketConditions: JSON.stringify({ timeframe: systemTemplate.primaryTimeframe }),
+        tokenDnaSnapshot: JSON.stringify({}),
+        traderComposition: JSON.stringify({}),
+        bigDataContext: JSON.stringify({}),
+        operationType: trade.direction,
+        timeframe: systemTemplate.primaryTimeframe,
+        entryPrice: trade.entryPrice,
+        entryTime: trade.entryTime,
+        entryReason: JSON.stringify({ reason: 'backtest_simulation', system: systemTemplate.name }),
+        exitPrice: trade.exitPrice ?? 0,
+        exitTime: trade.exitTime ?? new Date(),
+        exitReason: trade.exitReason,
+        quantity: trade.quantity,
+        positionSizeUsd: trade.size,
+        pnlUsd: trade.pnl,
+        pnlPct: trade.pnlPct,
+        holdTimeMin: trade.holdTimeMin,
+        maxFavorableExc: trade.mfe,
+        maxAdverseExc: trade.mae,
+        capitalAllocPct: trade.size / initialCapital * 100,
+        allocationMethodUsed: systemTemplate.allocationMethod,
+      }));
+
+      if (operationCreates.length > 0) {
+        await db.backtestOperation.createMany({
+          data: operationCreates,
+        });
+      }
+
+      // 7. Update the BacktestRun with results
+      await db.backtestRun.update({
+        where: { id: backtest.id },
+        data: {
+          status: 'COMPLETED',
+          progress: 1,
+          completedAt: new Date(),
+          finalCapital: result.finalEquity,
+          totalPnl: result.finalEquity - result.initialCapital,
+          totalPnlPct: result.totalReturnPct,
+          annualizedReturn: result.annualizedReturnPct,
+          benchmarkReturn: 0,
+          alpha: result.annualizedReturnPct,
+          totalTrades: result.totalTrades,
+          winTrades: result.winningTrades,
+          lossTrades: result.losingTrades,
+          winRate: result.winRate,
+          avgWin: result.avgWinPct,
+          avgLoss: result.avgLossPct,
+          profitFactor: result.profitFactor,
+          expectancy: result.expectancy,
+          maxDrawdown: result.maxDrawdown,
+          maxDrawdownPct: result.maxDrawdownPct,
+          sharpeRatio: result.sharpeRatio,
+          sortinoRatio: result.sortinoRatio,
+          calmarRatio: result.calmarRatio,
+          recoveryFactor: result.recoveryFactor,
+          avgHoldTimeMin: result.avgHoldTimeMin,
+          marketExposurePct: 0,
+          phaseResults: JSON.stringify(result.phaseBreakdown),
+          timeframeResults: JSON.stringify({ primaryTimeframe: systemTemplate.primaryTimeframe }),
+          operationTypeResults: JSON.stringify({}),
+          allocationMethodResults: JSON.stringify({ method: systemTemplate.allocationMethod }),
+        },
+      });
+
+      // Update trading system metrics
+      const updatedSystem = await db.tradingSystem.findUnique({
+        where: { id: system.id },
+      });
+
+      if (updatedSystem) {
+        const metricsUpdate: Record<string, unknown> = {
+          totalBacktests: updatedSystem.totalBacktests + 1,
+        };
+
+        if (result.sharpeRatio > updatedSystem.bestSharpe) {
+          metricsUpdate.bestSharpe = result.sharpeRatio;
         }
-      } catch {
-        result.status = 'created'; // Created but not yet running
+        if (result.winRate > updatedSystem.bestWinRate) {
+          metricsUpdate.bestWinRate = result.winRate;
+        }
+        if (result.totalReturnPct > updatedSystem.bestPnlPct) {
+          metricsUpdate.bestPnlPct = result.totalReturnPct;
+        }
+
+        if (updatedSystem.totalBacktests === 0) {
+          metricsUpdate.avgHoldTimeMin = result.avgHoldTimeMin;
+        } else {
+          metricsUpdate.avgHoldTimeMin =
+            (updatedSystem.avgHoldTimeMin * updatedSystem.totalBacktests + result.avgHoldTimeMin) /
+            (updatedSystem.totalBacktests + 1);
+        }
+
+        await db.tradingSystem.update({
+          where: { id: system.id },
+          data: metricsUpdate,
+        });
+      }
+
+      // Update the result status
+      const resultEntry = results.find(r => r.backtestId === backtest.id);
+      if (resultEntry) resultEntry.status = 'completed';
+    } catch (error) {
+      // Mark the backtest as failed if we have an ID
+      const failedResult = results.find(
+        r => r.strategyId === strategy.id && r.backtestId
+      );
+      if (failedResult && failedResult.backtestId) {
+        await db.backtestRun.update({
+          where: { id: failedResult.backtestId },
+          data: {
+            status: 'FAILED',
+            errorLog: error instanceof Error ? error.message : 'Unknown simulation error',
+            completedAt: new Date(),
+          },
+        }).catch(() => { /* ignore secondary update errors */ });
+        failedResult.status = 'failed';
+        failedResult.error = error instanceof Error ? error.message : 'Unknown error';
+      } else {
+        results.push({
+          strategyId: strategy.id,
+          strategyName: strategy.name,
+          backtestId: null,
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
       }
     }
   }
@@ -482,6 +938,7 @@ async function handleRunLoop(body: Record<string, unknown>) {
       totalCreated: results.filter(r => r.backtestId).length,
       totalFailed: results.filter(r => r.status === 'failed').length,
       totalRunning: results.filter(r => r.status === 'running').length,
+      totalCompleted: results.filter(r => r.status === 'completed').length,
     }
   });
 }
