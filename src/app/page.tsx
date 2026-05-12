@@ -16,26 +16,62 @@ import { OHLCVChart } from '@/components/dashboard/ohlcv-chart';
 import { WebSocketProvider } from '@/components/dashboard/websocket-provider';
 import { SimulationProvider } from '@/components/dashboard/simulation-provider';
 import { DataStatusBar } from '@/components/dashboard/data-status-bar';
+import { DeepAnalysisPanel } from '@/components/dashboard/deep-analysis-panel';
 import { useCryptoStore, type ActiveTab } from '@/store/crypto-store';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Brain,
+  BarChart3,
+  Dna,
+  Radio,
+  FlaskConical,
+  Wallet,
+  Eye,
+  TrendingUp,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  Activity,
+  DollarSign,
+  Layers,
+  Clock,
+  Sparkles,
+} from 'lucide-react';
 
 // ============================================================
-// KEYBOARD SHORTCUTS: F1-F11 for tabs, Escape to go back
+// SIDEBAR NAVIGATION CONFIG
 // ============================================================
 
-const FKEY_TAB_MAP: Record<string, ActiveTab> = {
-  'F1': 'dashboard',
-  'F2': 'signals',
-  'F3': 'dna-scanner',
-  'F4': 'charts',
-  'F5': 'pattern-builder',
-  'F6': 'heatmap',
-  'F7': 'trader-intel',
-  'F8': 'trading-systems',
-  'F9': 'backtesting',
-  'F10': 'big-data',
-  'F11': 'brain',
-};
+interface NavItem {
+  id: ActiveTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  shortcut: string;
+  description: string;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { id: 'dashboard', label: 'Token Flow', icon: BarChart3, shortcut: 'F1', description: 'Live token feed & prices' },
+  { id: 'signals', label: 'Signals', icon: Radio, shortcut: 'F2', description: 'Live signal feed' },
+  { id: 'dna-scanner', label: 'DNA Scanner', icon: Dna, shortcut: 'F3', description: 'Token DNA analysis' },
+  { id: 'brain', label: 'Brain', icon: Brain, shortcut: 'F4', description: 'Control center' },
+  { id: 'trading-systems', label: 'Trading Systems', icon: Wallet, shortcut: 'F5', description: 'Trading system lab' },
+  { id: 'backtesting', label: 'Backtesting Lab', icon: FlaskConical, shortcut: 'F6', description: 'Strategy backtesting' },
+  { id: 'trader-intel', label: 'Smart Money', icon: Eye, shortcut: 'F7', description: 'Trader intelligence' },
+  { id: 'deep-analysis', label: 'Deep Analysis', icon: Layers, shortcut: 'F8', description: 'Deep token analysis' },
+  { id: 'big-data', label: 'Predictive Engine', icon: Zap, shortcut: 'F9', description: 'AI predictions' },
+];
+
+// ============================================================
+// KEYBOARD SHORTCUTS
+// ============================================================
+
+const FKEY_TAB_MAP: Record<string, ActiveTab> = {};
+NAV_ITEMS.forEach((item, i) => {
+  FKEY_TAB_MAP[`F${i + 1}`] = item.id;
+});
 
 const TAB_HISTORY: ActiveTab[] = [];
 
@@ -43,7 +79,6 @@ function useKeyboardShortcuts() {
   const { setActiveTab, activeTab } = useCryptoStore();
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // F-key shortcuts
     if (FKEY_TAB_MAP[e.key]) {
       e.preventDefault();
       TAB_HISTORY.push(activeTab);
@@ -51,7 +86,6 @@ function useKeyboardShortcuts() {
       return;
     }
 
-    // Escape: go back to previous tab, or dashboard
     if (e.key === 'Escape') {
       const prevTab = TAB_HISTORY.pop() || 'dashboard';
       setActiveTab(prevTab);
@@ -66,131 +100,440 @@ function useKeyboardShortcuts() {
 }
 
 // ============================================================
+// TOP BAR COMPONENT
+// ============================================================
+
+function TopBar() {
+  const { isConnected, marketSummary } = useCryptoStore();
+  const [utcTime, setUtcTime] = useState('');
+
+  const { data: brainStatus } = useQuery({
+    queryKey: ['brain-status-topbar'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/brain/status');
+        if (!res.ok) return null;
+        const json = await res.json();
+        return json.data as {
+          totalSignals: number;
+          brainHealth: string;
+          tokensTracked: number;
+          brainCycles: number;
+        } | null;
+      } catch {
+        return null;
+      }
+    },
+    refetchInterval: 30000,
+    staleTime: 15000,
+  });
+
+  const { data: schedulerStatus } = useQuery({
+    queryKey: ['scheduler-status-topbar'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/brain/scheduler');
+        if (!res.ok) return null;
+        const json = await res.json();
+        return (json.data || json) as {
+          status: string;
+          totalCyclesCompleted: number;
+          capitalStrategy?: { totalCapital: number; growthPct: number };
+          persisted?: { totalCycles: number; capitalUsd: number };
+        } | null;
+      } catch {
+        return null;
+      }
+    },
+    refetchInterval: 15000,
+    staleTime: 10000,
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setUtcTime(new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC');
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const brainHealth = brainStatus?.brainHealth ?? 'UNKNOWN';
+  const totalSignals = brainStatus?.totalSignals ?? 0;
+  const tokensTracked = brainStatus?.tokensTracked ?? 0;
+  const brainCycles = schedulerStatus?.totalCyclesCompleted ?? schedulerStatus?.persisted?.totalCycles ?? 0;
+  const capital = schedulerStatus?.capitalStrategy?.totalCapital ?? schedulerStatus?.persisted?.capitalUsd ?? 0;
+  const growthPct = schedulerStatus?.capitalStrategy?.growthPct ?? 0;
+  const schedulerRunning = schedulerStatus?.status === 'RUNNING';
+
+  const formatCapital = (v: number) => {
+    if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
+    if (v >= 1e3) return `$${(v / 1e3).toFixed(1)}K`;
+    return `$${v.toFixed(0)}`;
+  };
+
+  return (
+    <div className="flex items-center justify-between px-3 h-9 bg-[#080b12] border-b border-[#1e293b] shrink-0">
+      {/* Left: Logo + Status */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[#3b82f6] font-mono text-xs font-bold tracking-wider blue-glow">
+            CryptoQuant
+          </span>
+          <span className="text-[#475569] font-mono text-[8px]">TERMINAL</span>
+        </div>
+        <div className="h-4 w-px bg-[#1e293b]" />
+        <div className="flex items-center gap-1">
+          <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500 live-pulse' : 'bg-red-500'}`} />
+          <span className={`font-mono text-[9px] ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
+            {isConnected ? 'LIVE' : 'OFFLINE'}
+          </span>
+        </div>
+        <div className="h-4 w-px bg-[#1e293b]" />
+        {/* Brain Status */}
+        <div className="flex items-center gap-1.5">
+          <Brain className={`h-3 w-3 ${schedulerRunning ? 'text-emerald-400' : 'text-[#475569]'}`} />
+          <span className={`font-mono text-[9px] font-bold ${
+            brainHealth === 'HEALTHY' ? 'text-emerald-400' :
+            brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
+            'text-[#64748b]'
+          }`}>
+            {schedulerRunning ? 'ACTIVE' : brainHealth === 'HEALTHY' ? 'HEALTHY' : 'IDLE'}
+          </span>
+        </div>
+      </div>
+
+      {/* Center: Key Metrics */}
+      <div className="flex items-center gap-4">
+        {/* Capital */}
+        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+          <DollarSign className="h-3 w-3 text-[#3b82f6]" />
+          <span className="text-[8px] font-mono text-[#64748b]">CAPITAL</span>
+          <span className="mono-data text-[10px] font-bold text-[#e2e8f0]">{formatCapital(capital)}</span>
+          <span className={`mono-data text-[9px] font-bold ${growthPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {growthPct >= 0 ? '+' : ''}{growthPct.toFixed(1)}%
+          </span>
+        </div>
+
+        {/* Cycles */}
+        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+          <Activity className="h-3 w-3 text-cyan-400" />
+          <span className="text-[8px] font-mono text-[#64748b]">CYCLES</span>
+          <span className="mono-data text-[10px] font-bold text-cyan-400">{brainCycles}</span>
+        </div>
+
+        {/* Tokens */}
+        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+          <BarChart3 className="h-3 w-3 text-[#3b82f6]" />
+          <span className="text-[8px] font-mono text-[#64748b]">TOKENS</span>
+          <span className="mono-data text-[10px] font-bold text-[#e2e8f0]">{tokensTracked.toLocaleString()}</span>
+        </div>
+
+        {/* Signals */}
+        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+          <Radio className="h-3 w-3 text-amber-400" />
+          <span className="text-[8px] font-mono text-[#64748b]">SIGNALS</span>
+          <span className="mono-data text-[10px] font-bold text-amber-400">{totalSignals}</span>
+        </div>
+
+        {/* Market */}
+        {marketSummary && (
+          <>
+            <div className="h-4 w-px bg-[#1e293b]" />
+            <div className="flex items-center gap-1">
+              <span className="text-[#f59e0b] font-mono text-[9px] font-bold">BTC</span>
+              <span className="mono-data text-[10px] text-[#e2e8f0]">${marketSummary.btcPrice.toLocaleString()}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[#627eea] font-mono text-[9px] font-bold">ETH</span>
+              <span className="mono-data text-[10px] text-[#e2e8f0]">${marketSummary.ethPrice.toLocaleString()}</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Right: Time */}
+      <div className="flex items-center gap-2">
+        <span className="mono-data text-[9px] text-[#475569]">{utcTime}</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SIDEBAR COMPONENT
+// ============================================================
+
+function Sidebar() {
+  const { activeTab, setActiveTab } = useCryptoStore();
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <nav
+      className={`flex flex-col h-full bg-[#0d1117] border-r border-[#1e293b] shrink-0 transition-all duration-200 ${
+        collapsed ? 'w-12' : 'w-[180px]'
+      }`}
+    >
+      {/* Nav Items */}
+      <div className="flex-1 overflow-y-auto py-1">
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`sidebar-nav-item w-full flex items-center gap-2 px-3 py-2 text-left ${
+                isActive ? 'active' : ''
+              }`}
+              title={`${item.label} (${item.shortcut})`}
+            >
+              <Icon className={`nav-icon h-4 w-4 shrink-0 ${
+                isActive ? 'text-[#3b82f6]' : 'text-[#64748b]'
+              }`} />
+              {!collapsed && (
+                <div className="flex flex-col min-w-0">
+                  <span className={`nav-label text-[11px] font-medium truncate ${
+                    isActive ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'
+                  }`}>
+                    {item.label}
+                  </span>
+                </div>
+              )}
+              {!collapsed && (
+                <span className={`ml-auto text-[8px] font-mono ${
+                  isActive ? 'text-[#3b82f6]/60' : 'text-[#475569]'
+                }`}>
+                  {item.shortcut}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Collapse Toggle */}
+      <div className="border-t border-[#1e293b] p-1">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex items-center justify-center w-full py-1.5 text-[#475569] hover:text-[#94a3b8] transition-colors"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? (
+            <ChevronRight className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronLeft className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+// ============================================================
+// QUICK START GUIDE
+// ============================================================
+
+function QuickStartGuide() {
+  const steps = [
+    { icon: Brain, label: 'Start the Brain', desc: 'Go to Brain tab and click Start to begin automated analysis' },
+    { icon: BarChart3, label: 'Browse Token Flow', desc: 'Monitor live token prices and market movements' },
+    { icon: Radio, label: 'Watch Signals', desc: 'Get real-time trading signals from multiple sources' },
+    { icon: Dna, label: 'Scan DNA', desc: 'Select a token and analyze its DNA risk profile' },
+  ];
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-col h-full"
+    >
+      {/* Welcome Header */}
+      <div className="px-6 pt-6 pb-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="h-5 w-5 text-[#3b82f6]" />
+          <h1 className="text-xl font-bold text-[#f1f5f9] font-mono">CryptoQuant Terminal</h1>
+        </div>
+        <p className="text-sm text-[#94a3b8] max-w-xl">
+          Professional-grade crypto analytics. Real-time signals, DNA risk scanning, smart money tracking, and AI-powered predictions — all in one terminal.
+        </p>
+      </div>
+
+      {/* Quick Start Steps */}
+      <div className="px-6 pb-4">
+        <h2 className="text-[11px] font-mono text-[#64748b] uppercase tracking-wider mb-3">Quick Start</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {steps.map((step, i) => {
+            const Icon = step.icon;
+            return (
+              <div
+                key={i}
+                className="quick-start-step bg-[#111827] border border-[#1e293b] rounded-lg p-4 cursor-pointer hover:border-[#3b82f6]/30 transition-all"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[#3b82f6]/10 border border-[#3b82f6]/20">
+                    <Icon className="h-4 w-4 text-[#3b82f6]" />
+                  </div>
+                  <span className="text-[9px] font-mono text-[#3b82f6]/60">STEP {i + 1}</span>
+                </div>
+                <h3 className="text-sm font-bold text-[#f1f5f9] mb-1">{step.label}</h3>
+                <p className="text-[11px] text-[#94a3b8] leading-relaxed">{step.desc}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Main Dashboard Content - Token Flow + Signals */}
+      <div className="flex-1 flex gap-1.5 min-h-0 px-1.5 pb-1.5">
+        <div className="w-[45%] shrink-0">
+          <TokenFlow />
+        </div>
+        <div className="flex-1 flex flex-col gap-1.5 min-h-0">
+          <div className="flex-1 min-h-0">
+            <SignalCenter />
+          </div>
+          <div className="shrink-0">
+            <IntelligenceModules />
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// MAIN CONTENT AREA
+// ============================================================
+
+function MainContent() {
+  const { activeTab, selectedToken } = useCryptoStore();
+
+  const contentMap: Record<ActiveTab, React.ReactNode> = {
+    dashboard: <QuickStartGuide />,
+    signals: (
+      <div className="flex-1 min-h-0 h-full">
+        <SignalCenter />
+      </div>
+    ),
+    'dna-scanner': (
+      <div className="flex-1 flex gap-1.5 min-h-0 h-full">
+        <div className="w-[35%] shrink-0">
+          <TokenFlow />
+        </div>
+        <div className="flex-1">
+          <DNAScanner />
+        </div>
+      </div>
+    ),
+    charts: (
+      <div className="flex-1 flex gap-1.5 min-h-0 h-full">
+        <div className="w-[35%] shrink-0">
+          <TokenFlow />
+        </div>
+        <div className="flex-1">
+          {selectedToken ? (
+            <OHLCVChart tokenAddress={selectedToken.id} chain={selectedToken.chain} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] border border-[#1e293b] rounded-lg">
+              <BarChart3 className="h-8 w-8 text-[#475569] mb-2" />
+              <span className="text-[#64748b] font-mono text-sm">Select a token to view charts</span>
+            </div>
+          )}
+        </div>
+      </div>
+    ),
+    'pattern-builder': (
+      <div className="flex-1 min-h-0 h-full">
+        <PatternBuilder />
+      </div>
+    ),
+    heatmap: (
+      <div className="flex-1 flex gap-1.5 min-h-0 h-full">
+        <div className="w-[35%] shrink-0">
+          <TokenFlow />
+        </div>
+        <div className="flex-1">
+          <UserHeatmap />
+        </div>
+      </div>
+    ),
+    'trader-intel': (
+      <div className="flex-1 min-h-0 h-full">
+        <TraderIntelligencePanel />
+      </div>
+    ),
+    'trading-systems': (
+      <div className="flex-1 min-h-0 h-full">
+        <TradingSystemsLab />
+      </div>
+    ),
+    backtesting: (
+      <div className="flex-1 min-h-0 h-full">
+        <BacktestingLab />
+      </div>
+    ),
+    'big-data': (
+      <div className="flex-1 min-h-0 h-full">
+        <BigDataPredictive />
+      </div>
+    ),
+    brain: (
+      <div className="flex-1 min-h-0 h-full">
+        <BrainControl />
+      </div>
+    ),
+    'deep-analysis': (
+      <div className="flex-1 min-h-0 h-full overflow-y-auto">
+        <DeepAnalysisPanel />
+      </div>
+    ),
+  };
+
+  return (
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={activeTab}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={{ duration: 0.15 }}
+        className="flex-1 flex min-h-0 p-1.5"
+      >
+        {contentMap[activeTab]}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+// ============================================================
 // DASHBOARD CONTENT
 // ============================================================
 
 function DashboardContent() {
-  const { activeTab, selectedToken } = useCryptoStore();
-
-  // Register keyboard shortcuts
   useKeyboardShortcuts();
 
   return (
-    <div className="flex flex-col h-screen bg-[#0a0e17] overflow-hidden terminal-scanlines">
-      {/* Header Bar */}
+    <div className="flex flex-col h-screen bg-[#0a0e17] overflow-hidden">
+      {/* Top Bar */}
+      <TopBar />
+
+      {/* Ticker Strip */}
       <HeaderBar />
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-0 p-1.5 gap-1.5">
-        {activeTab === 'dashboard' && (
-          <div className="flex-1 flex gap-1.5 min-h-0">
-            {/* Left: Token Flow (40%) */}
-            <div className="w-[40%] shrink-0">
-              <TokenFlow />
-            </div>
-            {/* Right: Signal Center + Intelligence Modules */}
-            <div className="flex-1 flex flex-col gap-1.5 min-h-0">
-              <div className="flex-1 min-h-0">
-                <SignalCenter />
-              </div>
-              {/* Intelligence Modules - Compact single row */}
-              <div className="shrink-0">
-                <IntelligenceModules />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'signals' && (
-          <div className="flex-1 min-h-0">
-            <SignalCenter />
-          </div>
-        )}
-
-        {activeTab === 'dna-scanner' && (
-          <div className="flex-1 flex gap-1.5 min-h-0">
-            <div className="w-[35%] shrink-0">
-              <TokenFlow />
-            </div>
-            <div className="flex-1">
-              <DNAScanner />
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'charts' && (
-          <div className="flex-1 flex gap-1.5 min-h-0">
-            <div className="w-[35%] shrink-0">
-              <TokenFlow />
-            </div>
-            <div className="flex-1">
-              {selectedToken ? (
-                <OHLCVChart
-                  tokenAddress={selectedToken.id}
-                  chain={selectedToken.chain}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] border border-[#1e293b] rounded-lg">
-                  <span className="text-[#64748b] font-mono text-sm">Select a token to view charts</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'pattern-builder' && (
-          <div className="flex-1 min-h-0">
-            <PatternBuilder />
-          </div>
-        )}
-
-        {activeTab === 'heatmap' && (
-          <div className="flex-1 flex gap-1.5 min-h-0">
-            <div className="w-[35%] shrink-0">
-              <TokenFlow />
-            </div>
-            <div className="flex-1">
-              <UserHeatmap />
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'trader-intel' && (
-          <div className="flex-1 min-h-0">
-            <TraderIntelligencePanel />
-          </div>
-        )}
-
-        {activeTab === 'trading-systems' && (
-          <div className="flex-1 min-h-0">
-            <TradingSystemsLab />
-          </div>
-        )}
-
-        {activeTab === 'backtesting' && (
-          <div className="flex-1 min-h-0">
-            <BacktestingLab />
-          </div>
-        )}
-
-        {activeTab === 'big-data' && (
-          <div className="flex-1 min-h-0">
-            <BigDataPredictive />
-          </div>
-        )}
-
-        {activeTab === 'brain' && (
-          <div className="flex-1 min-h-0">
-            <BrainControl />
-          </div>
-        )}
+      {/* Main Layout: Sidebar + Content */}
+      <div className="flex-1 flex min-h-0">
+        <Sidebar />
+        <MainContent />
       </div>
 
-      {/* Bottom Status Bar (Bloomberg style) */}
+      {/* Bottom Status Bar */}
       <DataStatusBar />
     </div>
   );
 }
+
+// ============================================================
+// HOME PAGE
+// ============================================================
 
 export default function HomePage() {
   return (

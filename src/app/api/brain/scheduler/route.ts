@@ -5,19 +5,21 @@ export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/brain/scheduler
- * Returns current scheduler status from the brainScheduler singleton.
- * Also loads persisted state from DB if scheduler is not running.
+ * Returns current scheduler status.
+ * Primary source: SchedulerState from DB (survives restarts).
+ * Supplemental: in-memory status from brainScheduler singleton for real-time task info.
  */
 export async function GET() {
   try {
     const { brainScheduler } = await import('@/lib/services/brain-scheduler');
+    const { loadSchedulerState } = await import('@/lib/services/scheduler-persistence');
     const { db } = await import('@/lib/db');
 
     // Get in-memory status from the singleton
-    const status = brainScheduler.getStatus();
+    const memStatus = brainScheduler.getStatus();
 
-    // Also fetch persisted state for additional info (e.g., stoppedAt, previous runs)
-    const persistedState = await db.schedulerState.findUnique({ where: { id: 'main' } }).catch(() => null);
+    // Load persisted state from DB (authoritative for survival across restarts)
+    const persistedState = await loadSchedulerState();
 
     // DB stats
     const [tokens, candles, signals, predictiveSignals] = await Promise.all([
@@ -45,18 +47,19 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        // From brainScheduler singleton (in-memory)
-        status: status.status,
-        uptime: status.uptime,
-        config: status.config,
-        tasks: status.tasks,
-        brainCycle: status.brainCycle,
-        capitalStrategy: status.capitalStrategy,
-        totalCyclesCompleted: status.totalCyclesCompleted,
-        lastError: status.lastError,
+        // From brainScheduler singleton (in-memory, real-time)
+        status: memStatus.status,
+        uptime: memStatus.uptime,
+        config: memStatus.config,
+        tasks: memStatus.tasks,
+        brainCycle: memStatus.brainCycle,
+        capitalStrategy: memStatus.capitalStrategy,
+        totalCyclesCompleted: memStatus.totalCyclesCompleted,
+        lastError: memStatus.lastError,
 
-        // From persisted state (survives restarts)
+        // From persisted state in DB (survives restarts)
         persisted: persistedState ? {
+          status: persistedState.status,
           startedAt: persistedState.startedAt,
           stoppedAt: persistedState.stoppedAt,
           totalCycles: persistedState.totalCycles,
@@ -66,6 +69,7 @@ export async function GET() {
           chain: persistedState.chain,
           scanLimit: persistedState.scanLimit,
           lastError: persistedState.lastError,
+          taskStates: persistedState.taskStates,
           updatedAt: persistedState.updatedAt,
         } : null,
 
@@ -93,13 +97,14 @@ export async function GET() {
 
 /**
  * POST /api/brain/scheduler
- * Controls the brain scheduler: start, stop, pause, resume, run_cycle, update_config
+ * Controls the brain scheduler: start, stop, pause, resume, run_cycle, update_config, auto_start
  *
  * Body: { action: string, params?: object }
  */
 export async function POST(request: NextRequest) {
   try {
     const { brainScheduler } = await import('@/lib/services/brain-scheduler');
+    const { saveSchedulerState } = await import('@/lib/services/scheduler-persistence');
 
     let body: any = {};
     try { body = await request.json(); } catch { /* no body */ }
@@ -114,6 +119,26 @@ export async function POST(request: NextRequest) {
         if (params?.chain) config.chain = params.chain;
         if (params?.scanLimit) config.scanLimit = Number(params.scanLimit);
 
+        // Update DB state to RUNNING before starting the in-memory scheduler
+        // This ensures the DB record is set even if start() encounters an error
+        try {
+          await saveSchedulerState({
+            status: 'RUNNING',
+            config: config,
+            lastCycleNumber: 0,
+            totalCycles: 0,
+            capitalUsd: config.capitalUsd ?? 10,
+            initialCapitalUsd: config.initialCapitalUsd ?? 10,
+            chain: config.chain ?? 'SOL',
+            scanLimit: config.scanLimit ?? 250,
+            startedAt: new Date(),
+            lastError: null,
+            taskStates: {},
+          });
+        } catch (dbErr) {
+          console.warn('[SchedulerAPI] Pre-start DB state update failed:', dbErr);
+        }
+
         const result = await brainScheduler.start(
           Object.keys(config).length > 0 ? config : undefined
         );
@@ -124,12 +149,31 @@ export async function POST(request: NextRequest) {
         });
       }
       case 'stop': {
+        // Update DB state to STOPPED
+        try {
+          await saveSchedulerState({
+            status: 'STOPPED',
+            config: brainScheduler.getConfig(),
+            lastCycleNumber: 0,
+            totalCycles: 0,
+            capitalUsd: brainScheduler.getConfig().capitalUsd,
+            initialCapitalUsd: brainScheduler.getConfig().initialCapitalUsd,
+            chain: brainScheduler.getConfig().chain,
+            scanLimit: brainScheduler.getConfig().scanLimit,
+            startedAt: null,
+            stoppedAt: new Date(),
+            lastError: null,
+            taskStates: {},
+          });
+        } catch (dbErr) {
+          console.warn('[SchedulerAPI] Pre-stop DB state update failed:', dbErr);
+        }
+
         const result = await brainScheduler.stop();
         return NextResponse.json({ success: true, data: result });
       }
       case 'pause': {
         const result = brainScheduler.pause();
-        // Persist the paused state
         return NextResponse.json({ success: true, data: result });
       }
       case 'resume': {
@@ -178,6 +222,46 @@ export async function POST(request: NextRequest) {
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/brain/scheduler
+ * Stops the brain scheduler and updates DB state to STOPPED.
+ */
+export async function DELETE() {
+  try {
+    const { brainScheduler } = await import('@/lib/services/brain-scheduler');
+    const { saveSchedulerState } = await import('@/lib/services/scheduler-persistence');
+
+    // Update DB state to STOPPED before stopping the in-memory scheduler
+    try {
+      const currentConfig = brainScheduler.getConfig();
+      await saveSchedulerState({
+        status: 'STOPPED',
+        config: currentConfig,
+        lastCycleNumber: 0,
+        totalCycles: 0,
+        capitalUsd: currentConfig.capitalUsd,
+        initialCapitalUsd: currentConfig.initialCapitalUsd,
+        chain: currentConfig.chain,
+        scanLimit: currentConfig.scanLimit,
+        startedAt: null,
+        stoppedAt: new Date(),
+        lastError: null,
+        taskStates: {},
+      });
+    } catch (dbErr) {
+      console.warn('[SchedulerAPI] Pre-delete DB state update failed:', dbErr);
+    }
+
+    const result = await brainScheduler.stop();
+    return NextResponse.json({
+      success: true,
+      data: result,
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

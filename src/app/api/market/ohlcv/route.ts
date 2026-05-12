@@ -156,24 +156,56 @@ async function fetchOHLCVOnDemand(
 
     const chain = token?.chain || 'SOL';
 
-    // Try CoinGecko OHLCV (tokenAddress is often the CoinGecko coinId)
+    // Resolve CoinGecko coin ID from token address
+    // Priority: coingecko: prefix > direct address > symbol search
+    let coinId: string | null = null;
+
+    // Case 1: Address is a CoinGecko synthetic ID (coingecko:xxx)
+    if (tokenAddress.startsWith('coingecko:')) {
+      coinId = tokenAddress.replace('coingecko:', '');
+    }
+
+    // Case 2: Try using the address directly as a CoinGecko ID
+    if (!coinId) {
+      try {
+        const testOhlcv = await coinGeckoClient.getOHLCV(tokenAddress, 1);
+        if (testOhlcv && testOhlcv.length > 0) {
+          coinId = tokenAddress;
+        }
+      } catch { /* not a valid CoinGecko ID */ }
+    }
+
+    // Case 3: Try contract address lookup
+    if (!coinId && token?.chain) {
+      try {
+        coinId = await coinGeckoClient.getCoinIdFromContract(chain, tokenAddress);
+      } catch { /* contract lookup failed */ }
+    }
+
+    // Case 4: Search by symbol
+    if (!coinId && token?.symbol) {
+      try {
+        const searchResults = await coinGeckoClient.searchTokens(token.symbol);
+        const match = searchResults?.find(c =>
+          c.symbol?.toUpperCase() === token.symbol.toUpperCase()
+        );
+        if (match?.id) {
+          coinId = match.id;
+        }
+      } catch { /* search failed */ }
+    }
+
+    if (!coinId) {
+      console.log(`[/api/market/ohlcv] Could not resolve CoinGecko ID for ${tokenAddress} (${token?.symbol})`);
+      return 0;
+    }
+
     let ohlcv: Array<{ timestamp: number; open: number; high: number; low: number; close: number }> = [];
 
     try {
-      ohlcv = await coinGeckoClient.getOHLCV(tokenAddress, days);
+      ohlcv = await coinGeckoClient.getOHLCV(coinId, days);
     } catch {
-      // If direct coinId fails, try searching for the token
-      if (token?.symbol) {
-        try {
-          const searchResults = await coinGeckoClient.searchTokens(token.symbol);
-          const match = searchResults?.find(c =>
-            c.symbol?.toUpperCase() === token.symbol.toUpperCase()
-          );
-          if (match?.id) {
-            ohlcv = await coinGeckoClient.getOHLCV(match.id, days);
-          }
-        } catch { /* search failed */ }
-      }
+      // CoinGecko OHLCV fetch failed
     }
 
     if (ohlcv.length > 0) {

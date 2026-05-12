@@ -5,7 +5,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Database, RefreshCw, Loader2, Radio, Download, ArrowUp, ArrowDown } from 'lucide-react';
+import { Database, RefreshCw, Loader2, Radio, Download, ArrowUp, ArrowDown, Search } from 'lucide-react';
 
 // ============================================================
 // API RESPONSE TYPES
@@ -136,7 +136,7 @@ type SortColumn = 'symbol' | 'price' | '5m' | '1h' | '24h' | 'volume' | 'liquidi
 // ============================================================
 
 export function TokenFlow() {
-  const { tokens: wsTokens, selectedToken, selectToken, chainFilter, setChainFilter, riskFilter, setRiskFilter, sortBy, setSortBy, search: storeSearch } = useCryptoStore();
+  const { tokens: wsTokens, selectedToken, selectToken, chainFilter, setChainFilter, riskFilter, setRiskFilter, sortBy, setSortBy } = useCryptoStore();
   const [search, setSearch] = useState('');
   const [useLiveData, setUseLiveData] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -390,13 +390,16 @@ export function TokenFlow() {
 
       {/* Filter Bar - compact */}
       <div className="flex items-center gap-1.5 px-2 py-1 border-b border-[#1e293b] bg-[#0d1117]">
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="bg-[#1a1f2e] border border-[#2d3748] rounded px-1.5 py-0.5 text-[9px] font-mono text-[#e2e8f0] placeholder-[#475569] w-20 focus:outline-none focus:border-[#d4af37]/50"
-        />
+        <div className="relative">
+          <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 h-2.5 w-2.5 text-[#475569]" />
+          <input
+            type="text"
+            placeholder="Search tokens..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-[#1a1f2e] border border-[#2d3748] rounded pl-5 pr-2 py-0.5 text-[9px] font-mono text-[#e2e8f0] placeholder-[#475569] w-28 focus:outline-none focus:border-[#3b82f6]/50 transition-colors"
+          />
+        </div>
 
         <div className="flex gap-px">
           {['ALL', 'SOL', 'ETH', 'BASE', 'ARB'].map((chain) => (
@@ -407,7 +410,7 @@ export function TokenFlow() {
               onClick={() => setChainFilter(chain)}
               className={`h-4 px-1 text-[8px] font-mono ${
                 chainFilter === chain
-                  ? 'bg-[#d4af37]/15 text-[#d4af37]'
+                  ? 'bg-[#3b82f6]/15 text-[#3b82f6]'
                   : 'text-[#64748b] hover:text-[#e2e8f0]'
               }`}
             >

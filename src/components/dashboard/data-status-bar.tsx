@@ -1,7 +1,8 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { ChevronUp, ChevronDown, Activity } from 'lucide-react';
 
 interface DataLoaderStatus {
   tokens: number;
@@ -32,6 +33,8 @@ interface BrainStatus {
 }
 
 export function DataStatusBar() {
+  const [expanded, setExpanded] = useState(false);
+
   // Fetch data loader status
   const { data: loaderData } = useQuery({
     queryKey: ['data-loader-status-bar'],
@@ -66,7 +69,7 @@ export function DataStatusBar() {
     staleTime: 15000,
   });
 
-  // Derive computed values from query data (no setState in effect)
+  // Derive computed values
   const { lastSync, dbSizeKB } = useMemo(() => {
     if (!loaderData) return { lastSync: '--:--:--', dbSizeKB: 0 };
     const sync = new Date().toISOString().substring(11, 19);
@@ -91,64 +94,135 @@ export function DataStatusBar() {
   };
 
   return (
-    <div className="status-bar flex items-center justify-between px-2 h-5 text-[#64748b] shrink-0">
-      {/* Left: Data counts */}
-      <div className="flex items-center gap-2">
-        <span className="flex items-center gap-0.5">
-          <span className="text-[#d4af37]">◆</span>
-          <span>{tokenCount.toLocaleString()} tokens</span>
-        </span>
-        <span className="text-[#2d3748]">│</span>
-        <span>{candleCount.toLocaleString()} candles</span>
-        <span className="text-[#2d3748]">│</span>
-        <span>{signalCount} signals</span>
-        <span className="text-[#2d3748]">│</span>
-        <span>{dnaCount} DNA</span>
-        <span className="text-[#2d3748]">│</span>
-        <span>{traderCount} traders</span>
-        <span className="text-[#2d3748]">│</span>
-        <span>{patternCount} patterns</span>
+    <div className="shrink-0">
+      {/* Main Status Bar */}
+      <div className="status-bar flex items-center justify-between px-3 h-6 text-[#64748b]">
+        {/* Left: Data counts */}
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <span className="text-[#3b82f6]">◆</span>
+            <span>{tokenCount.toLocaleString()} tokens</span>
+          </span>
+          <span className="text-[#1e293b]">│</span>
+          <span>{candleCount.toLocaleString()} candles</span>
+          <span className="text-[#1e293b]">│</span>
+          <span>{signalCount} signals</span>
+          <span className="text-[#1e293b]">│</span>
+          <span>{dnaCount} DNA</span>
+          <span className="text-[#1e293b]">│</span>
+          <span>{traderCount} traders</span>
+          <span className="text-[#1e293b]">│</span>
+          <span>{patternCount} patterns</span>
+        </div>
+
+        {/* Center: Brain + Loader Status */}
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            Brain:
+            <span className={`font-bold ${
+              brainHealth === 'HEALTHY' ? 'text-emerald-400' :
+              brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
+              'text-red-400'
+            }`}>
+              {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth}
+            </span>
+          </span>
+          <span className="text-[#1e293b]">│</span>
+          <span className="flex items-center gap-1">
+            Loader:
+            <span className={`font-bold ${loaderStatus === 'IDLE' ? 'text-emerald-400' : 'text-yellow-400'}`}>
+              {loaderStatus}
+            </span>
+          </span>
+          <span className="text-[#1e293b]">│</span>
+          <span>Enrich: {enrichmentPct}%</span>
+        </div>
+
+        {/* Right: DB + Sync + Sources + Expand */}
+        <div className="flex items-center gap-3">
+          <span>DB: {formatDbSize(dbSizeKB)}</span>
+          <span className="text-[#1e293b]">│</span>
+          <span>Sync: {lastSync}</span>
+          <span className="text-[#1e293b]">│</span>
+          <span className="flex items-center gap-1.5">
+            API:
+            <span className="data-dot data-dot-live" />
+            <span className="text-emerald-400">DexScreener</span>
+            <span className="data-dot data-dot-live" />
+            <span className="text-emerald-400">CoinGecko</span>
+            <span className="data-dot data-dot-db" />
+            <span className="text-yellow-400">DexPaprika</span>
+          </span>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-0.5 text-[#475569] hover:text-[#94a3b8] transition-colors ml-1"
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+          </button>
+        </div>
       </div>
 
-      {/* Center: Brain + Loader Status */}
-      <div className="flex items-center gap-2">
-        <span className="flex items-center gap-0.5">
-          Brain:
-          <span className={`font-bold ${
-            brainHealth === 'HEALTHY' ? 'text-emerald-400' :
-            brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
-            'text-red-400'
-          }`}>
-            {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth}
-          </span>
-        </span>
-        <span className="text-[#2d3748]">│</span>
-        <span className="flex items-center gap-0.5">
-          Loader:
-          <span className={`font-bold ${loaderStatus === 'IDLE' ? 'text-emerald-400' : 'text-yellow-400'}`}>
-            {loaderStatus}
-          </span>
-        </span>
-        <span className="text-[#2d3748]">│</span>
-        <span>Enrich: {enrichmentPct}%</span>
-      </div>
+      {/* Expanded Detail Panel */}
+      {expanded && (
+        <div className="font-mono text-[9px] bg-[#060910] border-t border-[#1e293b] px-3 py-2 flex items-start gap-6">
+          {/* Token Stats */}
+          <div className="space-y-1">
+            <span className="text-[#3b82f6] font-bold uppercase tracking-wider">Token Data</span>
+            <div className="text-[#64748b] space-y-0.5">
+              <div className="flex gap-4">
+                <span>Total: <span className="text-[#94a3b8]">{tokenCount.toLocaleString()}</span></span>
+                <span>w/ Volume: <span className="text-[#94a3b8]">{loaderData?.tokensWithVolume ?? 0}</span></span>
+                <span>w/ Liquidity: <span className="text-[#94a3b8]">{loaderData?.tokensWithLiquidity ?? 0}</span></span>
+              </div>
+              <div className="flex gap-4">
+                <span>Enriched: <span className="text-[#94a3b8]">{loaderData?.tokensEnriched ?? 0}</span></span>
+                <span>Enrichment: <span className="text-[#94a3b8]">{enrichmentPct}%</span></span>
+              </div>
+            </div>
+          </div>
 
-      {/* Right: DB + Sync + Sources */}
-      <div className="flex items-center gap-2">
-        <span>DB: {formatDbSize(dbSizeKB)}</span>
-        <span className="text-[#2d3748]">│</span>
-        <span>Sync: {lastSync || '--:--:--'}</span>
-        <span className="text-[#2d3748]">│</span>
-        <span className="flex items-center gap-1">
-          API:
-          <span className="data-dot data-dot-live" />
-          <span className="text-emerald-400">DexScreener</span>
-          <span className="data-dot data-dot-live" />
-          <span className="text-emerald-400">CoinGecko</span>
-          <span className="data-dot data-dot-db" />
-          <span className="text-yellow-400">DexPaprika</span>
-        </span>
-      </div>
+          {/* Brain Stats */}
+          <div className="space-y-1">
+            <span className="text-[#3b82f6] font-bold uppercase tracking-wider">Brain Stats</span>
+            <div className="text-[#64748b] space-y-0.5">
+              <div className="flex gap-4">
+                <span>Cycles: <span className="text-[#94a3b8]">{brainData?.brainCycles ?? 0}</span></span>
+                <span>Signals: <span className="text-[#94a3b8]">{signalCount}</span></span>
+                <span>Win Rate: <span className="text-[#94a3b8]">{brainData?.winRate ?? 'N/A'}</span></span>
+              </div>
+              <div className="flex gap-4">
+                <span>Systems: <span className="text-[#94a3b8]">{brainData?.tradingSystems ?? 0}</span></span>
+                <span>Patterns: <span className="text-[#94a3b8]">{patternCount}</span></span>
+                <span>Backtests: <span className="text-[#94a3b8]">{brainData?.backtestRuns ?? 0}</span></span>
+              </div>
+            </div>
+          </div>
+
+          {/* API Status */}
+          <div className="space-y-1">
+            <span className="text-[#3b82f6] font-bold uppercase tracking-wider">API Status</span>
+            <div className="text-[#64748b] space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1"><span className="data-dot data-dot-live" /> DexScreener — <span className="text-emerald-400">Online</span></span>
+                <span className="flex items-center gap-1"><span className="data-dot data-dot-live" /> CoinGecko — <span className="text-emerald-400">Online</span></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1"><span className="data-dot data-dot-db" /> DexPaprika — <span className="text-yellow-400">Cached</span></span>
+                <span className="flex items-center gap-1"><span className="data-dot data-dot-live" /> Birdeye — <span className="text-emerald-400">Online</span></span>
+              </div>
+            </div>
+          </div>
+
+          {/* DB Info */}
+          <div className="space-y-1">
+            <span className="text-[#3b82f6] font-bold uppercase tracking-wider">Database</span>
+            <div className="text-[#64748b] space-y-0.5">
+              <div>Size: <span className="text-[#94a3b8]">{formatDbSize(dbSizeKB)}</span></div>
+              <div>Active Jobs: <span className="text-[#94a3b8]">{loaderData?.activeJobs ?? 0}</span></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

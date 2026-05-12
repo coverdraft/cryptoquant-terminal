@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CryptoQuant Terminal — El Bloomberg del Retail",
+  title: "CryptoQuant Terminal — Professional Crypto Analytics",
   description: "Professional crypto quantitative analytics terminal with real-time data, signal intelligence, DNA scanning, and pattern recognition.",
   icons: {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>",
