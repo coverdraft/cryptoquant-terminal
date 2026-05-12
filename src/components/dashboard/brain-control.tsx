@@ -152,7 +152,8 @@ function formatDuration(ms: number): string {
   return `${(ms / 60000).toFixed(1)}m`;
 }
 
-function formatCurrency(val: number): string {
+function formatCurrency(val: number | undefined | null): string {
+  if (val == null || isNaN(val)) return '$0.00';
   if (Math.abs(val) >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
   if (Math.abs(val) >= 1_000) return `$${(val / 1_000).toFixed(2)}K`;
   return `$${val.toFixed(2)}`;
@@ -703,10 +704,10 @@ export default function BrainControl() {
                     <span className="text-[9px] font-mono text-[#64748b]">PnL</span>
                     <span
                       className={`text-[11px] font-mono font-bold ${
-                        data.capitalStrategy.currentPnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        (data.capitalStrategy.currentPnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
                       }`}
                     >
-                      {data.capitalStrategy.currentPnl >= 0 ? '+' : ''}
+                      {(data.capitalStrategy.currentPnl ?? 0) >= 0 ? '+' : ''}
                       {formatCurrency(data.capitalStrategy.currentPnl)}
                     </span>
                   </div>
@@ -714,11 +715,11 @@ export default function BrainControl() {
                     <span className="text-[9px] font-mono text-[#64748b]">Growth</span>
                     <span
                       className={`text-[11px] font-mono font-bold ${
-                        data.capitalStrategy.growthPct >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        (data.capitalStrategy.growthPct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
                       }`}
                     >
-                      {data.capitalStrategy.growthPct >= 0 ? '+' : ''}
-                      {data.capitalStrategy.growthPct.toFixed(2)}%
+                      {(data.capitalStrategy.growthPct ?? 0) >= 0 ? '+' : ''}
+                      {(data.capitalStrategy.growthPct ?? 0).toFixed(2)}%
                     </span>
                   </div>
                   {/* Mini growth bar */}
@@ -726,10 +727,10 @@ export default function BrainControl() {
                     <div className="h-1.5 bg-[#1a1f2e] rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-700 ${
-                          data.capitalStrategy.growthPct >= 0 ? 'bg-emerald-500' : 'bg-red-500'
+                          (data.capitalStrategy.growthPct ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-red-500'
                         }`}
                         style={{
-                          width: `${Math.min(Math.abs(data.capitalStrategy.growthPct), 100)}%`,
+                          width: `${Math.min(Math.abs(data.capitalStrategy.growthPct ?? 0), 100)}%`,
                         }}
                       />
                     </div>
