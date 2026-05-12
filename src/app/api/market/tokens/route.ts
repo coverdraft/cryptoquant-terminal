@@ -62,13 +62,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const chain = searchParams.get('chain') || 'solana';
-  const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 5000);
+  const chain = (searchParams.get('chain') || 'ALL').toUpperCase();
+  const limit = Math.min(parseInt(searchParams.get('limit') || '500', 10), 5000);
 
   try {
     // Build chain filter - include 'ALL' chain tokens (CoinGecko top tokens) for any chain
     let chainFilter: any = undefined;
-    if (chain !== 'all') {
+    if (chain !== 'ALL') {
       const chainUpper = chain.toUpperCase();
       if (chainUpper === 'SOLANA') {
         chainFilter = { in: ['SOL', 'SOLANA', 'ALL'] };

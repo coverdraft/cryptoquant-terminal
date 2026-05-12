@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Common schemas
 export const addressSchema = z.string().min(32).max(64).regex(/^[A-Za-z0-9]+$/, "Invalid address format");
 
-export const chainSchema = z.enum(['SOL', 'ETH', 'BASE', 'ARB', 'OP', 'MATIC', 'BSC']);
+export const chainSchema = z.enum(['SOL', 'ETH', 'BASE', 'ARB', 'OP', 'MATIC', 'BSC', 'ALL']);
 
 export const timeframeSchema = z.enum(['1m', '5m', '15m', '1h', '4h', '1d']);
 
@@ -13,9 +13,9 @@ export const paginationSchema = z.object({
 });
 
 export const tokenQuerySchema = z.object({
-  chain: chainSchema.optional().default('SOL'),
+  chain: chainSchema.optional().default('ALL'),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(5000).default(500),
   sort: z.enum(['volume24h', 'priceChange24h', 'marketCap', 'liquidity']).optional().default('volume24h'),
   order: z.enum(['asc', 'desc']).optional().default('desc'),
   search: z.string().optional(),
@@ -25,7 +25,7 @@ export const ohlcvQuerySchema = z.object({
   address: z.string().min(1),
   timeframe: timeframeSchema.optional().default('1h'),
   days: z.coerce.number().int().positive().max(365).default(7),
-  chain: chainSchema.optional().default('SOL'),
+  chain: chainSchema.optional().default('ALL'),
 });
 
 export const brainActionSchema = z.object({

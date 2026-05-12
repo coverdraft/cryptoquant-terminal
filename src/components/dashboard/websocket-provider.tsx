@@ -9,6 +9,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3003';
 const SOCKET_CONNECTION_TIMEOUT = 10000; // 10s fallback threshold
 const REST_POLL_INTERVAL = 30000; // Fallback polling every 30s
 const REST_TOKEN_LIMIT = 500; // Load up to 500 tokens via REST (vs 50 before)
+let autoSeedTriggered = false;
 
 /**
  * Map a WS-server token object to the store's TokenData shape.
@@ -76,7 +77,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         );
         console.log(`[WSProvider] Loaded ${tokensData.tokens.length} tokens from REST API`);
       } else {
-        console.warn('[WSProvider] No tokens found in database - run seed script to populate data');
+        console.warn('[WSProvider] No tokens found in database - triggering brain init to seed data');
+        // Auto-seed: trigger the brain init endpoint once to populate the DB
+        if (!autoSeedTriggered) {
+          autoSeedTriggered = true;
+          fetch('/api/brain/init').catch(() => {});
+        }
       }
 
       try {
@@ -168,7 +174,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     console.log('[WSProvider] Connecting to Socket.IO at', WS_URL);
 
     const socket = io(WS_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -209,9 +215,10 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       startRestPolling();
     });
 
-    socket.on('connect_error', (err) => {
+    socket.on('connect_error', () => {
       // This is expected when WS server is not running — REST fallback handles it
-      if (!isUsingWsRef.current) {
+      // Only log once to reduce console noise
+      if (!isUsingWsRef.current && !fallbackTimerRef.current) {
         console.warn('[WSProvider] Socket.IO unavailable (WS server not running?) — using REST fallback');
       }
     });

@@ -150,7 +150,7 @@ export function TokenFlow() {
     queryKey: ['market-tokens', chainFilter, riskFilter, sortBy, search],
     queryFn: async () => {
       try {
-        const chain = chainFilter === 'ALL' ? 'all' : chainFilter.toLowerCase();
+        const chain = chainFilter;
         const params = new URLSearchParams({
           chain,
           limit: '500',

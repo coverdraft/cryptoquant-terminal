@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
+    "dev:ws": "cd mini-services/crypto-ws && bun --hot index.ts",
+    "dev:all": "npx concurrently \"next dev -p 3000\" \"cd mini-services/crypto-ws && bun --hot index.ts\"",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
