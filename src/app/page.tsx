@@ -79,7 +79,7 @@ function StrategyLabContent() {
             Classic
           </TabsTrigger>
           <TabsTrigger value="ai-optimizer" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
-            🤖 AI Optimizer
+            🤖 AI Manager
           </TabsTrigger>
         </TabsList>
       </div>
@@ -224,11 +224,16 @@ function TopBar() {
         <div className="flex items-center gap-1.5">
           <Brain className={`h-3 w-3 ${schedulerRunning ? 'text-emerald-400' : 'text-[#475569]'}`} />
           <span className={`font-mono text-[9px] font-bold ${
-            brainHealth === 'HEALTHY' ? 'text-emerald-400' :
-            brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
+            brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'text-emerald-400' :
+            brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'text-cyan-400' :
+            brainHealth === 'IDLE' ? 'text-gray-400' :
             'text-[#64748b]'
           }`}>
-            {schedulerRunning ? 'ACTIVE' : brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth === 'NEEDS_VALIDATION' ? 'PENDING' : 'IDLE'}
+            {schedulerRunning ? 'ACTIVE' :
+              brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'ACTIVE' :
+              brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'LEARNING' :
+              brainHealth === 'IDLE' ? 'IDLE' :
+              brainHealth}
           </span>
         </div>
       </div>

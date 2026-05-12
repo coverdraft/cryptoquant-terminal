@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
+import path from 'path';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 // ============================================================
-// Best Strategies - stored in-memory with localStorage sync
-// In a production app this would be a DB table, but per the spec
-// we use a simple approach for now.
+// Best Strategies - persisted to JSON file
 // ============================================================
 
-// In-memory store (persists per server session)
-let bestStrategies: Array<{
+interface BestStrategyEntry {
   id: string;
   strategyName: string;
   category: string;
@@ -29,7 +29,42 @@ let bestStrategies: Array<{
   score: number;
   backtestId: string;
   savedAt: string;
-}> = [];
+}
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'best-strategies.json');
+
+// In-memory cache, loaded from file on first access
+let bestStrategies: BestStrategyEntry[] | null = null;
+
+async function loadStrategies(): Promise<BestStrategyEntry[]> {
+  if (bestStrategies !== null) return bestStrategies;
+
+  try {
+    if (existsSync(DATA_FILE)) {
+      const raw = await readFile(DATA_FILE, 'utf-8');
+      bestStrategies = JSON.parse(raw) as BestStrategyEntry[];
+    } else {
+      bestStrategies = [];
+    }
+  } catch {
+    bestStrategies = [];
+  }
+
+  return bestStrategies;
+}
+
+async function saveStrategies(strategies: BestStrategyEntry[]): Promise<void> {
+  bestStrategies = strategies;
+  try {
+    if (!existsSync(DATA_DIR)) {
+      await mkdir(DATA_DIR, { recursive: true });
+    }
+    await writeFile(DATA_FILE, JSON.stringify(strategies, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Error persisting best strategies to file:', error);
+  }
+}
 
 /**
  * GET /api/strategy-optimizer/best
@@ -37,8 +72,9 @@ let bestStrategies: Array<{
  */
 export async function GET() {
   try {
+    const strategies = await loadStrategies();
     return NextResponse.json({
-      data: bestStrategies.sort((a, b) => b.score - a.score),
+      data: strategies.sort((a, b) => b.score - a.score),
     });
   } catch (error) {
     console.error('Error fetching best strategies:', error);
@@ -65,12 +101,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const strategies = await loadStrategies();
+
     // Check if already saved
-    const existingIndex = bestStrategies.findIndex(
+    const existingIndex = strategies.findIndex(
       s => s.backtestId === strategy.backtestId
     );
 
-    const entry = {
+    const entry: BestStrategyEntry = {
       id: (strategy.id as string) || `best-${Date.now()}`,
       strategyName: strategy.strategyName as string,
       category: (strategy.category as string) || 'UNKNOWN',
@@ -92,10 +130,12 @@ export async function POST(request: NextRequest) {
     };
 
     if (existingIndex >= 0) {
-      bestStrategies[existingIndex] = entry;
+      strategies[existingIndex] = entry;
     } else {
-      bestStrategies.push(entry);
+      strategies.push(entry);
     }
+
+    await saveStrategies(strategies);
 
     return NextResponse.json({
       data: entry,
@@ -127,12 +167,14 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const initialLength = bestStrategies.length;
-    bestStrategies = bestStrategies.filter(
+    const strategies = await loadStrategies();
+    const initialLength = strategies.length;
+    const filtered = strategies.filter(
       s => (id && s.id !== id) && (backtestId && s.backtestId !== backtestId)
     );
+    const removed = initialLength - filtered.length;
 
-    const removed = initialLength - bestStrategies.length;
+    await saveStrategies(filtered);
 
     return NextResponse.json({
       data: { removed },

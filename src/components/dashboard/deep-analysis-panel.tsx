@@ -148,10 +148,37 @@ const PHASE_COLORS: Record<string, { color: string; bg: string; border: string }
   LEGACY: { color: 'text-slate-400', bg: 'bg-slate-500/15', border: 'border-slate-500/30' },
 };
 
-const DEPTH_CONFIG: Record<ThinkingDepth, { label: string; desc: string; color: string }> = {
-  QUICK: { label: 'Quick', desc: 'Fast scan, basic analysis', color: 'text-yellow-400' },
-  STANDARD: { label: 'Standard', desc: 'Balanced depth and speed', color: 'text-cyan-400' },
-  DEEP: { label: 'Deep', desc: 'Extended analysis with scenarios', color: 'text-violet-400' },
+const DEPTH_CONFIG: Record<ThinkingDepth, { label: string; desc: string; color: string; badgeText: string; badgeBg: string; badgeBorder: string; glowClass: string; infoText: string }> = {
+  QUICK: {
+    label: 'Quick',
+    desc: 'Fast scan, basic analysis',
+    color: 'text-yellow-400',
+    badgeText: '\u26A1 Quick Scan',
+    badgeBg: 'bg-amber-500/15',
+    badgeBorder: 'border-amber-500/40',
+    glowClass: '',
+    infoText: 'Quick scan analyzed 3 core factors. For deeper insights, run Standard or Deep analysis.',
+  },
+  STANDARD: {
+    label: 'Standard',
+    desc: 'Balanced depth and speed',
+    color: 'text-cyan-400',
+    badgeText: '\uD83D\uDD0D Standard Analysis',
+    badgeBg: 'bg-cyan-500/15',
+    badgeBorder: 'border-cyan-500/40',
+    glowClass: '',
+    infoText: 'Standard analysis evaluated 6 weighted factors with 3 scenarios. For stress tests and detailed narratives, run Deep analysis.',
+  },
+  DEEP: {
+    label: 'Deep',
+    desc: 'Extended analysis with scenarios',
+    color: 'text-violet-400',
+    badgeText: '\uD83E\uDDEC Deep Analysis',
+    badgeBg: 'bg-violet-500/15',
+    badgeBorder: 'border-violet-500/40',
+    glowClass: 'drop-shadow-[0_0_8px_rgba(139,92,246,0.5)]',
+    infoText: 'Deep analysis evaluated 12 factors with 5 scenarios, stress tests, phase transition probabilities, and whale narratives.',
+  },
 };
 
 const CHAINS = [
@@ -425,42 +452,49 @@ function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
     <motion.div
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3 bg-[#0d1117] border border-[#1e293b] rounded-lg"
+      className="flex flex-col gap-3 px-4 py-3 bg-[#0d1117] border border-[#1e293b] rounded-lg"
     >
-      {/* Symbol & Price */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-[#1a1f2e] border border-[#2d3748]">
-          <Sparkles className="h-4 w-4 text-[#d4af37]" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-base font-bold text-[#e2e8f0]">{analysis.symbol}</span>
-            <Badge className={`${pCfg.bg} ${pCfg.color} ${pCfg.border} border text-[9px] font-mono font-bold`}>
-              {phasePhase}
-            </Badge>
-            <Badge variant="outline" className="text-[9px] font-mono border-[#2d3748] text-[#64748b] h-4 px-1.5">
-              {depthCfg.label}
-            </Badge>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        {/* Symbol & Price */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center h-9 w-9 rounded-lg bg-[#1a1f2e] border border-[#2d3748]">
+            <Sparkles className="h-4 w-4 text-[#d4af37]" />
           </div>
-          <span className="font-mono text-[11px] text-[#64748b]">
-            {analysis.tokenAddress?.slice(0, 6)}...{analysis.tokenAddress?.slice(-4)}
-          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-base font-bold text-[#e2e8f0]">{analysis.symbol}</span>
+              <Badge className={`${pCfg.bg} ${pCfg.color} ${pCfg.border} border text-[9px] font-mono font-bold`}>
+                {phasePhase}
+              </Badge>
+            </div>
+            <span className="font-mono text-[11px] text-[#64748b]">
+              {analysis.tokenAddress?.slice(0, 6)}...{analysis.tokenAddress?.slice(-4)}
+            </span>
+          </div>
+        </div>
+
+        <div className="sm:ml-auto flex items-center gap-3">
+          {/* Confidence */}
+          <div className="text-right">
+            <div className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider">Confidence</div>
+            <div className="font-mono text-sm font-bold text-[#e2e8f0]">
+              {formatConfidence(analysis.verdict?.confidence || (analysis as any).recommendationConfidence || 0.5)}
+            </div>
+          </div>
+
+          <Separator orientation="vertical" className="h-8 bg-[#1e293b]" />
+
+          {/* Verdict */}
+          <VerdictBadge action={verdictAction} />
         </div>
       </div>
 
-      <div className="sm:ml-auto flex items-center gap-3">
-        {/* Confidence */}
-        <div className="text-right">
-          <div className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider">Confidence</div>
-          <div className="font-mono text-sm font-bold text-[#e2e8f0]">
-            {formatConfidence(analysis.verdict?.confidence || (analysis as any).recommendationConfidence || 0.5)}
-          </div>
-        </div>
-
-        <Separator orientation="vertical" className="h-8 bg-[#1e293b]" />
-
-        {/* Verdict */}
-        <VerdictBadge action={verdictAction} />
+      {/* Prominent Depth Badge */}
+      <div className="flex items-center">
+        <Badge className={`${depthCfg.badgeBg} ${depthCfg.color} ${depthCfg.badgeBorder} border text-[10px] font-mono font-bold px-3 py-1 gap-1.5 ${depthCfg.glowClass}`}>
+          {analysis.depth === 'DEEP' && <span className="inline-block animate-pulse">\u2726</span>}
+          {depthCfg.badgeText}
+        </Badge>
       </div>
     </motion.div>
   );
@@ -1389,7 +1423,7 @@ export function DeepAnalysisPanel() {
               {/* Verdict Summary */}
               <VerdictSummaryCard analysis={analysis} />
 
-              {/* Assessment Cards Row - always show for STANDARD/DEEP, simplified for QUICK */}
+              {/* Assessment Cards Row - STANDARD/DEEP only; hidden for QUICK */}
               {analysis.depth !== 'QUICK' && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <PhaseAssessmentCard analysis={analysis} index={0} />
@@ -1398,15 +1432,17 @@ export function DeepAnalysisPanel() {
                 </div>
               )}
 
-              {/* Evidence Matrix - always show */}
-              <EvidenceMatrixCard analysis={analysis} index={3} />
+              {/* Evidence Matrix - STANDARD/DEEP only; hidden for QUICK */}
+              {analysis.depth !== 'QUICK' && (
+                <EvidenceMatrixCard analysis={analysis} index={3} />
+              )}
 
-              {/* Scenarios Card - only for STANDARD and DEEP */}
+              {/* Scenarios Card - STANDARD and DEEP */}
               {analysis.depth !== 'QUICK' && (analysis as any).scenarios && (
                 <ScenariosCard analysis={analysis} index={6} />
               )}
 
-              {/* Strategy & Risk Row - always show for STANDARD/DEEP, simplified for QUICK */}
+              {/* Strategy & Risk Row - STANDARD/DEEP show full; QUICK shows compact */}
               {analysis.depth !== 'QUICK' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <StrategyRecommendationCard analysis={analysis} index={4} />
@@ -1414,7 +1450,7 @@ export function DeepAnalysisPanel() {
                 </div>
               )}
 
-              {/* Quick mode: show compact strategy */}
+              {/* Quick mode: show compact strategy + risk */}
               {analysis.depth === 'QUICK' && (
                 <QuickStrategyCard analysis={analysis} />
               )}
@@ -1442,6 +1478,27 @@ export function DeepAnalysisPanel() {
                   </span>
                 </div>
               )}
+
+              {/* Analysis Depth Info Card */}
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3, duration: 0.3 }}
+              >
+                <div className={`flex items-start gap-2.5 px-4 py-3 rounded-lg border ${DEPTH_CONFIG[analysis.depth]?.badgeBg || 'bg-cyan-500/10'} ${DEPTH_CONFIG[analysis.depth]?.badgeBorder || 'border-cyan-500/30'}`}>
+                  <Layers className={`h-4 w-4 shrink-0 mt-0.5 ${DEPTH_CONFIG[analysis.depth]?.color || 'text-cyan-400'}`} />
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`font-mono text-[10px] font-bold uppercase tracking-wider ${DEPTH_CONFIG[analysis.depth]?.color || 'text-cyan-400'}`}>
+                        Analysis Depth: {DEPTH_CONFIG[analysis.depth]?.label || 'Standard'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-[#94a3b8] leading-relaxed">
+                      {DEPTH_CONFIG[analysis.depth]?.infoText || 'Standard analysis evaluated 6 weighted factors with 3 scenarios.'}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>

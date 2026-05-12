@@ -80,7 +80,10 @@ export async function GET() {
         winRate: validatedCount > 0 ? (correctCount / validatedCount * 100).toFixed(1) + '%' : 'N/A',
         
         // Health
-        brainHealth: unvalidatedCount > 0 ? 'NEEDS_VALIDATION' : 'HEALTHY',
+        brainHealth: signalCount === 0 ? 'IDLE' :
+          validatedCount === 0 ? 'LEARNING' :
+          unvalidatedCount > 0 ? 'ACTIVE' :
+          'HEALTHY',
         enginesWired: [
           'lifecycle', 'behavioral', 'feedback', 'ohlcv',
           'big-data', 'wallet-profiler', 'bot-detection',

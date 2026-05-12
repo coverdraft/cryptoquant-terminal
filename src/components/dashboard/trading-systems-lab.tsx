@@ -908,7 +908,7 @@ export default function TradingSystemsLab() {
       // Ensure every template has a unique id (fallback to index-based)
       return templatesData.templates.map((tpl, idx) => ({
         ...tpl,
-        id: tpl.id || `tpl-${idx}`,
+        id: tpl.id || `tpl-${selectedCategory}-${idx}`,
       }));
     }
     if (templatesData.grouped && typeof templatesData.grouped === 'object') {
@@ -1083,7 +1083,7 @@ export default function TradingSystemsLab() {
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                     <AnimatePresence>
                       {templates.map((tpl, idx) => (
-                        <TemplateCard key={tpl.id || `tpl-${idx}`} template={tpl} onSelect={handleCreateFromTemplate} />
+                        <TemplateCard key={`tpl-${selectedCategory}-${idx}`} template={tpl} onSelect={handleCreateFromTemplate} />
                       ))}
                     </AnimatePresence>
                   </div>

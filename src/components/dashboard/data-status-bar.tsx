@@ -123,15 +123,21 @@ export function DataStatusBar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className={`font-bold ${
-                  brainHealth === 'HEALTHY' ? 'text-emerald-400' :
-                  brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
+                  brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'text-emerald-400' :
+                  brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'text-cyan-400' :
+                  brainHealth === 'IDLE' ? 'text-gray-400' :
                   'text-red-400'
                 }`}>
-                  {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth === 'NEEDS_VALIDATION' ? 'PENDING' : brainHealth}
+                  {brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'ACTIVE' :
+                    brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'LEARNING' :
+                    brainHealth === 'IDLE' ? 'IDLE' :
+                    brainHealth}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="bg-[#1a1f2e] border border-[#2d3748] text-[#94a3b8] text-[10px] font-mono z-[100]">
-                {brainHealth === 'NEEDS_VALIDATION' ? 'Signals pending validation' : `Brain status: ${brainHealth}`}
+                {brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'Brain is learning from new signals' :
+                  brainHealth === 'IDLE' ? 'No signals yet — brain is idle' :
+                  `Brain status: ${brainHealth}`}
               </TooltipContent>
             </Tooltip>
           </span>

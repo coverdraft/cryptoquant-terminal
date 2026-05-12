@@ -5,7 +5,7 @@ export const addressSchema = z.string().min(32).max(64).regex(/^[A-Za-z0-9]+$/, 
 
 export const chainSchema = z.enum(['SOL', 'ETH', 'BASE', 'ARB', 'OP', 'MATIC', 'BSC', 'ALL']);
 
-export const timeframeSchema = z.enum(['1m', '5m', '15m', '1h', '4h', '1d']);
+export const timeframeSchema = z.enum(['1m', '5m', '10m', '15m', '30m', '1h', '4h', '1d']);
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().positive().default(1),

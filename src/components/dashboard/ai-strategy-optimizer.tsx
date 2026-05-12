@@ -18,6 +18,14 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from '@/components/ui/tooltip';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import {
@@ -27,19 +35,18 @@ import {
   Trophy,
   Play,
   Loader2,
-  ChevronRight,
   Star,
   BookmarkPlus,
   Rocket,
   Target,
-  Shield,
-  TrendingUp,
   BarChart3,
   Activity,
   DollarSign,
-  ArrowUpDown,
   Trash2,
   RefreshCw,
+  Pencil,
+  Sparkles,
+  Filter,
 } from 'lucide-react';
 
 // ============================================================
@@ -121,6 +128,16 @@ interface BestStrategy {
   savedAt: string;
 }
 
+interface EditStrategyForm {
+  name: string;
+  timeframe: string;
+  tokenAgeCategory: string;
+  riskTolerance: string;
+  takeProfit: number;
+  stopLoss: number;
+  positionSize: number;
+}
+
 // ============================================================
 // CONSTANTS
 // ============================================================
@@ -132,7 +149,7 @@ const RISK_COLORS: Record<string, { bg: string; text: string }> = {
   EXTREME: { bg: 'bg-red-500/15', text: 'text-red-400' },
 };
 
-const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
+const TIMEFRAMES = ['1m', '5m', '10m', '15m', '30m', '1h', '4h'];
 const TOKEN_AGES = ['NEW', 'MEDIUM', 'OLD'];
 const RISK_LEVELS = ['CONSERVATIVE', 'MODERATE', 'AGGRESSIVE'];
 
@@ -148,13 +165,31 @@ export default function AIStrategyOptimizer() {
   // State
   const [capital, setCapital] = useState(10000);
   const [allocationMode, setAllocationMode] = useState<'distribute' | 'focus'>('distribute');
-  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(['1h', '4h']);
+  const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(['5m', '15m', '1h']);
   const [selectedTokenAges, setSelectedTokenAges] = useState<string[]>(['NEW', 'MEDIUM']);
   const [riskTolerance, setRiskTolerance] = useState('MODERATE');
   const [strategyCount, setStrategyCount] = useState(6);
   const [currentStep, setCurrentStep] = useState<Step>('setup');
   const [generatedStrategies, setGeneratedStrategies] = useState<StrategyConfig[]>([]);
   const [loopResults, setLoopResults] = useState<Array<{ strategyId: string; strategyName: string; backtestId: string | null; status: string; error?: string }>>([]);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingStrategy, setEditingStrategy] = useState<StrategyConfig | null>(null);
+  const [editForm, setEditForm] = useState<EditStrategyForm>({
+    name: '',
+    timeframe: '15m',
+    tokenAgeCategory: 'NEW',
+    riskTolerance: 'MODERATE',
+    takeProfit: 40,
+    stopLoss: 15,
+    positionSize: 5,
+  });
+
+  // Results filter state
+  const [filterTimeframe, setFilterTimeframe] = useState<string>('ALL');
+  const [filterTokenAge, setFilterTokenAge] = useState<string>('ALL');
+  const [filterRisk, setFilterRisk] = useState<string>('ALL');
 
   // Queries
   const { data: scanData, isLoading: scanLoading, refetch: refetchScan } = useQuery({
@@ -195,7 +230,7 @@ export default function AIStrategyOptimizer() {
     enabled: false,
   });
 
-  const { data: bestData, isLoading: bestLoading } = useQuery({
+  const { data: bestData } = useQuery({
     queryKey: ['strategy-optimizer-best'],
     queryFn: async () => {
       try {
@@ -256,7 +291,7 @@ export default function AIStrategyOptimizer() {
     onSuccess: (data) => {
       const results = data.data?.results || [];
       setLoopResults(results);
-      toast.success(`Created ${results.filter((r: any) => r.backtestId).length} backtests`);
+      toast.success(`Created ${results.filter((r: { backtestId: string | null }) => r.backtestId).length} backtests`);
       setCurrentStep('results');
       refetchRank();
     },
@@ -301,6 +336,42 @@ export default function AIStrategyOptimizer() {
     },
   });
 
+  const activateMutation = useMutation({
+    mutationFn: async (strategy: BestStrategy) => {
+      const res = await fetch(`/api/trading-systems`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `[AI] ${strategy.strategyName}`,
+          category: strategy.category,
+          config: {
+            assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<24H' : strategy.tokenAgeCategory === 'MEDIUM' ? '<30D' : '>30D' },
+            phaseConfig: { genesis: strategy.tokenAgeCategory === 'NEW', early: true, growth: true, maturity: strategy.tokenAgeCategory === 'OLD', decline: false },
+            entrySignal: { signalType: 'SMART_MONEY_ENTRY', confidenceThreshold: 70, confirmationRequired: true, timeWindow: 15 },
+            execution: { orderType: 'LIMIT', slippageTolerance: 1.5, maxPositionSize: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5, executionDelay: 0 },
+            exitSignal: { takeProfit: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25, stopLoss: strategy.maxDrawdownPct > 0 ? Math.round(strategy.maxDrawdownPct * 0.5) : 10, trailingStop: true, trailingStopPercent: 10, timeBasedExit: 1440 },
+            riskManagement: { maxDrawdown: strategy.maxDrawdownPct || 20, maxConcurrentTrades: 3, maxDailyLoss: 5, positionSizing: 'RISK_BASED' },
+            capitalAllocation: { method: 'risk_parity', percentage: Math.round(strategy.capitalAllocation / 100), maxAllocation: 2, rebalanceFrequency: 'DAILY' },
+            bigDataContext: { whaleTracking: true, smartMoneyMirror: true, botDetection: true, onChainMetrics: true, socialSentiment: false },
+          },
+          primaryTimeframe: strategy.timeframe || '15m',
+          maxPositionPct: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5,
+          stopLossPct: strategy.maxDrawdownPct > 0 ? Math.round(strategy.maxDrawdownPct * 0.5) : 10,
+          takeProfitPct: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to activate');
+      return res.json();
+    },
+    onSuccess: () => {
+      toast.success('Strategy activated as trading system!');
+      queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
+    },
+    onError: () => {
+      toast.error('Failed to activate strategy');
+    },
+  });
+
   // Handlers
   const handleScan = useCallback(() => {
     setCurrentStep('scanning');
@@ -317,6 +388,19 @@ export default function AIStrategyOptimizer() {
     runLoopMutation.mutate();
   }, [runLoopMutation]);
 
+  const handleQuickStart = useCallback(() => {
+    setCapital(10000);
+    setAllocationMode('distribute');
+    setSelectedTimeframes(['5m', '15m', '1h']);
+    setSelectedTokenAges(['NEW', 'MEDIUM']);
+    setRiskTolerance('MODERATE');
+    setStrategyCount(6);
+    // Auto-trigger scan + generate
+    setCurrentStep('scanning');
+    refetchScan();
+    generateMutation.mutate();
+  }, [refetchScan, generateMutation]);
+
   const toggleTimeframe = (tf: string) => {
     setSelectedTimeframes(prev =>
       prev.includes(tf) ? prev.filter(t => t !== tf) : [...prev, tf]
@@ -329,20 +413,86 @@ export default function AIStrategyOptimizer() {
     );
   };
 
+  // Edit strategy handlers
+  const openEditDialog = (strategy: StrategyConfig) => {
+    setEditingStrategy(strategy);
+    setEditForm({
+      name: strategy.name,
+      timeframe: strategy.timeframe,
+      tokenAgeCategory: strategy.tokenAgeCategory,
+      riskTolerance: strategy.riskTolerance,
+      takeProfit: (strategy.config?.exitSignal as Record<string, unknown>)?.takeProfit as number || 40,
+      stopLoss: (strategy.config?.exitSignal as Record<string, unknown>)?.stopLoss as number || 15,
+      positionSize: (strategy.config?.riskManagement as Record<string, unknown>)?.maxPositionSize as number || 5,
+    });
+    setEditDialogOpen(true);
+  };
+
+  const saveEditStrategy = () => {
+    if (!editingStrategy) return;
+    setGeneratedStrategies(prev =>
+      prev.map(s => {
+        if (s.id !== editingStrategy.id) return s;
+        return {
+          ...s,
+          name: editForm.name,
+          timeframe: editForm.timeframe,
+          tokenAgeCategory: editForm.tokenAgeCategory,
+          riskTolerance: editForm.riskTolerance,
+          config: {
+            ...s.config,
+            exitSignal: {
+              ...((s.config?.exitSignal as Record<string, unknown>) || {}),
+              takeProfit: editForm.takeProfit,
+              stopLoss: editForm.stopLoss,
+            },
+            riskManagement: {
+              ...((s.config?.riskManagement as Record<string, unknown>) || {}),
+              maxPositionSize: editForm.positionSize,
+            },
+          },
+        };
+      })
+    );
+    setEditDialogOpen(false);
+    toast.success('Strategy updated');
+  };
+
   const tokens = scanData?.tokens || [];
   const rankedResults = rankData?.results || [];
   const bestStrategies = Array.isArray(bestData) ? bestData : [];
+
+  // Filter ranked results
+  const filteredRankedResults = rankedResults.filter(item => {
+    if (filterTimeframe !== 'ALL' && item.timeframe !== filterTimeframe) return false;
+    if (filterTokenAge !== 'ALL' && item.tokenAgeCategory !== filterTokenAge) return false;
+    if (filterRisk !== 'ALL' && item.riskTolerance !== filterRisk) return false;
+    return true;
+  });
+
+  // Get unique values for filter pills
+  const uniqueTimeframes = [...new Set(rankedResults.map(r => r.timeframe))].filter(Boolean);
+  const uniqueTokenAges = [...new Set(rankedResults.map(r => r.tokenAgeCategory))].filter(Boolean);
+  const uniqueRisks = [...new Set(rankedResults.map(r => r.riskTolerance))].filter(Boolean);
 
   return (
     <div className="flex flex-col h-full bg-[#0a0e17] border border-[#1e293b] rounded-lg overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#1e293b] bg-[#0d1117] shrink-0">
         <Brain className="h-4 w-4 text-[#d4af37]" />
-        <span className="text-[#d4af37] font-mono text-sm font-bold tracking-wider">AI STRATEGY OPTIMIZER</span>
+        <span className="text-[#d4af37] font-mono text-sm font-bold tracking-wider">AI TRADING MANAGER</span>
         <Badge className="text-[9px] h-5 px-1.5 font-mono bg-[#1a1f2e] text-[#94a3b8] border-[#2d3748] ml-2">
           Step: {currentStep.toUpperCase()}
         </Badge>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleQuickStart}
+            className="h-6 px-2 text-[10px] font-mono text-[#d4af37] hover:text-[#f0d060] hover:bg-[#d4af37]/10"
+          >
+            <Sparkles className="h-3 w-3 mr-1" /> Quick Start
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -379,7 +529,7 @@ export default function AIStrategyOptimizer() {
           </div>
 
           {/* ============================================= */}
-          {/* STEP 1: Capital Setup */}
+          {/* STEP 1: Capital Setup - 3 Column Layout */}
           {/* ============================================= */}
           <div className="bg-[#0d1117] border border-[#1e293b] rounded-lg p-4 space-y-3">
             <div className="flex items-center gap-2 mb-2">
@@ -387,98 +537,128 @@ export default function AIStrategyOptimizer() {
               <span className="text-[11px] font-mono text-[#94a3b8] uppercase tracking-wider">Capital Setup</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Capital Input */}
-              <div>
-                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Total Capital ($)</label>
-                <Input
-                  type="number"
-                  value={capital}
-                  onChange={e => setCapital(Number(e.target.value))}
-                  className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
-                />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* Left: Capital & Allocation */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Total Capital ($)</label>
+                  <Input
+                    type="number"
+                    value={capital}
+                    onChange={e => setCapital(Number(e.target.value))}
+                    className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Allocation Mode</label>
+                  <Select value={allocationMode} onValueChange={v => setAllocationMode(v as 'distribute' | 'focus')}>
+                    <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                      <SelectItem value="distribute" className="text-[10px] font-mono text-[#e2e8f0]">Distribute</SelectItem>
+                      <SelectItem value="focus" className="text-[10px] font-mono text-[#e2e8f0]">Focus</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Capital Visualization Bar */}
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-[9px] font-mono text-[#64748b] mb-1">
+                    <span>Capital Distribution</span>
+                    <span>${capital.toLocaleString()} total</span>
+                  </div>
+                  <div className="h-3 bg-[#1a1f2e] rounded-full overflow-hidden flex">
+                    {generatedStrategies.length > 0 ? generatedStrategies.map((s, i) => (
+                      <div
+                        key={s.id}
+                        className="h-full transition-all duration-300"
+                        style={{
+                          width: `${(s.capitalAllocation / capital) * 100}%`,
+                          backgroundColor: `hsl(${(i * 360 / generatedStrategies.length) + 40}, 70%, 50%)`,
+                        }}
+                        title={`${s.name}: $${s.capitalAllocation.toFixed(0)}`}
+                      />
+                    )) : (
+                      <div className="h-full bg-[#2d3748] w-full" />
+                    )}
+                  </div>
+                  {generatedStrategies.length > 0 && (
+                    <div className="text-[8px] font-mono text-[#475569] mt-0.5">
+                      {allocationMode === 'distribute'
+                        ? `${generatedStrategies.length} strategies × $${(capital / Math.max(generatedStrategies.length, 1)).toFixed(0)} each`
+                        : `$${capital.toLocaleString()} focused on each strategy`}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Allocation Mode */}
-              <div>
-                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Allocation Mode</label>
-                <Select value={allocationMode} onValueChange={v => setAllocationMode(v as 'distribute' | 'focus')}>
-                  <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
-                    <SelectItem value="distribute" className="text-[10px] font-mono text-[#e2e8f0]">Distribute</SelectItem>
-                    <SelectItem value="focus" className="text-[10px] font-mono text-[#e2e8f0]">Focus</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Risk Tolerance */}
-              <div>
-                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Risk Tolerance</label>
-                <Select value={riskTolerance} onValueChange={setRiskTolerance}>
-                  <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
-                    {RISK_LEVELS.map(r => (
-                      <SelectItem key={r} value={r} className="text-[10px] font-mono text-[#e2e8f0]">{r}</SelectItem>
+              {/* Center: Timeframes & Token Ages (as toggle pill buttons) */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1.5 block">Timeframes</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {TIMEFRAMES.map(tf => (
+                      <button
+                        key={tf}
+                        onClick={() => toggleTimeframe(tf)}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-mono border transition-all ${
+                          selectedTimeframes.includes(tf)
+                            ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
+                            : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                        }`}
+                      >
+                        {tf}
+                      </button>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1.5 block">Token Age Filter</label>
+                  <div className="flex gap-1.5">
+                    {TOKEN_AGES.map(age => (
+                      <button
+                        key={age}
+                        onClick={() => toggleTokenAge(age)}
+                        className={`px-3 py-1 rounded-full text-[10px] font-mono border transition-all ${
+                          selectedTokenAges.includes(age)
+                            ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
+                            : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                        }`}
+                      >
+                        {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              {/* Strategy Count */}
-              <div>
-                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Max Strategies</label>
-                <Input
-                  type="number"
-                  value={strategyCount}
-                  onChange={e => setStrategyCount(Number(e.target.value))}
-                  min={1}
-                  max={20}
-                  className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
-                />
-              </div>
-            </div>
-
-            {/* Timeframe Checkboxes */}
-            <div>
-              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1.5 block">Timeframes</label>
-              <div className="flex flex-wrap gap-1.5">
-                {TIMEFRAMES.map(tf => (
-                  <button
-                    key={tf}
-                    onClick={() => toggleTimeframe(tf)}
-                    className={`px-2 py-1 rounded text-[10px] font-mono border transition-all ${
-                      selectedTimeframes.includes(tf)
-                        ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
-                        : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
-                    }`}
-                  >
-                    {tf}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Token Age Checkboxes */}
-            <div>
-              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1.5 block">Token Age Filter</label>
-              <div className="flex gap-1.5">
-                {TOKEN_AGES.map(age => (
-                  <button
-                    key={age}
-                    onClick={() => toggleTokenAge(age)}
-                    className={`px-3 py-1 rounded text-[10px] font-mono border transition-all ${
-                      selectedTokenAges.includes(age)
-                        ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30'
-                        : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
-                    }`}
-                  >
-                    {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
-                  </button>
-                ))}
+              {/* Right: Risk & Strategy Count */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Risk Tolerance</label>
+                  <Select value={riskTolerance} onValueChange={setRiskTolerance}>
+                    <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                      {RISK_LEVELS.map(r => (
+                        <SelectItem key={r} value={r} className="text-[10px] font-mono text-[#e2e8f0]">{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Max Strategies</label>
+                  <Input
+                    type="number"
+                    value={strategyCount}
+                    onChange={e => setStrategyCount(Number(e.target.value))}
+                    min={1}
+                    max={20}
+                    className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+                  />
+                </div>
               </div>
             </div>
 
@@ -596,6 +776,19 @@ export default function AIStrategyOptimizer() {
                       <Badge variant="outline" className="text-[8px] h-3.5 px-1 font-mono border-[#2d3748] text-[#64748b]">
                         {strat.timeframe}
                       </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(strat)}
+                            className="h-5 w-5 p-0 text-[#64748b] hover:text-[#d4af37]"
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit Strategy</TooltipContent>
+                      </Tooltip>
                     </div>
                   ))}
                 </div>
@@ -653,7 +846,7 @@ export default function AIStrategyOptimizer() {
                 <BarChart3 className="h-3.5 w-3.5 text-[#d4af37]" />
                 <span className="text-[11px] font-mono text-[#94a3b8] uppercase tracking-wider">Results Ranking</span>
                 <Badge className="text-[8px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#64748b] border-[#2d3748]">
-                  {rankedResults.length} results
+                  {filteredRankedResults.length} results
                 </Badge>
               </div>
               <Button
@@ -667,10 +860,90 @@ export default function AIStrategyOptimizer() {
               </Button>
             </div>
 
-            {rankedResults.length === 0 ? (
+            {/* Filter Pills */}
+            {rankedResults.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pb-2 border-b border-[#1e293b]/50">
+                <Filter className="h-3 w-3 text-[#475569]" />
+                {/* Timeframe filter */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[8px] font-mono text-[#475569]">TF:</span>
+                  <button
+                    onClick={() => setFilterTimeframe('ALL')}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                      filterTimeframe === 'ALL' ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {uniqueTimeframes.map(tf => (
+                    <button
+                      key={tf}
+                      onClick={() => setFilterTimeframe(tf)}
+                      className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                        filterTimeframe === tf ? 'bg-[#d4af37]/15 text-[#d4af37] border-[#d4af37]/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                      }`}
+                    >
+                      {tf}
+                    </button>
+                  ))}
+                </div>
+                {/* Token age filter */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[8px] font-mono text-[#475569]">Age:</span>
+                  <button
+                    onClick={() => setFilterTokenAge('ALL')}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                      filterTokenAge === 'ALL' ? 'bg-cyan-600/15 text-cyan-400 border-cyan-500/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {uniqueTokenAges.map(age => (
+                    <button
+                      key={age}
+                      onClick={() => setFilterTokenAge(age)}
+                      className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                        filterTokenAge === age ? 'bg-cyan-600/15 text-cyan-400 border-cyan-500/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                      }`}
+                    >
+                      {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
+                    </button>
+                  ))}
+                </div>
+                {/* Risk filter */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[8px] font-mono text-[#475569]">Risk:</span>
+                  <button
+                    onClick={() => setFilterRisk('ALL')}
+                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                      filterRisk === 'ALL' ? 'bg-emerald-600/15 text-emerald-400 border-emerald-500/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {uniqueRisks.map(risk => (
+                    <button
+                      key={risk}
+                      onClick={() => setFilterRisk(risk)}
+                      className={`px-1.5 py-0.5 rounded text-[8px] font-mono border transition-all ${
+                        filterRisk === risk ? 'bg-emerald-600/15 text-emerald-400 border-emerald-500/30' : 'bg-[#0a0e17] text-[#64748b] border-[#1e293b] hover:border-[#2d3748]'
+                      }`}
+                    >
+                      {risk.slice(0, 4)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredRankedResults.length === 0 ? (
               <div className="flex flex-col items-center py-8 text-[#64748b]">
                 <BarChart3 className="h-8 w-8 mb-2 text-[#2d3748]" />
-                <span className="font-mono text-sm">No completed backtests yet. Run the optimization loop first.</span>
+                <span className="font-mono text-sm">
+                  {rankedResults.length === 0
+                    ? 'No completed backtests yet. Run the optimization loop first.'
+                    : 'No results match your filters.'}
+                </span>
               </div>
             ) : (
               <div className="max-h-72 overflow-y-auto">
@@ -689,7 +962,7 @@ export default function AIStrategyOptimizer() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rankedResults.slice(0, 20).map((result, idx) => (
+                    {filteredRankedResults.slice(0, 20).map((result, idx) => (
                       <tr key={result.id || `rank-${idx}`} className="border-b border-[#1e293b]/50 hover:bg-[#111827] transition-colors">
                         <td className="py-1.5 px-1.5 text-[#d4af37] font-bold">{idx + 1}</td>
                         <td className="py-1.5 px-1.5 text-[#e2e8f0] max-w-[200px] truncate">{result.strategyName}</td>
@@ -754,14 +1027,21 @@ export default function AIStrategyOptimizer() {
                         <Badge className="text-[8px] h-3.5 px-1.5 font-mono bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30">
                           Score: {strat.score.toFixed(1)}
                         </Badge>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-5 w-5 p-0 text-[#64748b] hover:text-emerald-400"
-                          title="Deploy Strategy"
-                        >
-                          <Rocket className="h-3 w-3" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => activateMutation.mutate(strat)}
+                              disabled={activateMutation.isPending}
+                              className="h-5 w-5 p-0 text-[#64748b] hover:text-emerald-400"
+                              title="Activate as Trading System"
+                            >
+                              <Rocket className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Activate as Live Trading System</TooltipContent>
+                        </Tooltip>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -800,6 +1080,113 @@ export default function AIStrategyOptimizer() {
           </div>
         </div>
       </ScrollArea>
+
+      {/* ============================================= */}
+      {/* Edit Strategy Dialog */}
+      {/* ============================================= */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="bg-[#0d1117] border-[#1e293b] text-[#e2e8f0] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-mono text-[#d4af37]">Edit Strategy</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {/* Strategy Name */}
+            <div>
+              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Strategy Name</label>
+              <Input
+                value={editForm.name}
+                onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+              />
+            </div>
+            {/* Timeframe */}
+            <div>
+              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Timeframe</label>
+              <Select value={editForm.timeframe} onValueChange={v => setEditForm(prev => ({ ...prev, timeframe: v }))}>
+                <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                  {TIMEFRAMES.map(tf => (
+                    <SelectItem key={tf} value={tf} className="text-[10px] font-mono text-[#e2e8f0]">{tf}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Token Age */}
+            <div>
+              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Token Age</label>
+              <Select value={editForm.tokenAgeCategory} onValueChange={v => setEditForm(prev => ({ ...prev, tokenAgeCategory: v }))}>
+                <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                  {TOKEN_AGES.map(age => (
+                    <SelectItem key={age} value={age} className="text-[10px] font-mono text-[#e2e8f0]">
+                      {age === 'NEW' ? '<24h' : age === 'MEDIUM' ? '<30d' : '>30d'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Risk Tolerance */}
+            <div>
+              <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Risk Tolerance</label>
+              <Select value={editForm.riskTolerance} onValueChange={v => setEditForm(prev => ({ ...prev, riskTolerance: v }))}>
+                <SelectTrigger className="h-8 text-[10px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                  {RISK_LEVELS.map(r => (
+                    <SelectItem key={r} value={r} className="text-[10px] font-mono text-[#e2e8f0]">{r}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* Take Profit / Stop Loss / Position Size */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Take Profit %</label>
+                <Input
+                  type="number"
+                  value={editForm.takeProfit}
+                  onChange={e => setEditForm(prev => ({ ...prev, takeProfit: Number(e.target.value) }))}
+                  className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Stop Loss %</label>
+                <Input
+                  type="number"
+                  value={editForm.stopLoss}
+                  onChange={e => setEditForm(prev => ({ ...prev, stopLoss: Number(e.target.value) }))}
+                  className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider mb-1 block">Position Size %</label>
+                <Input
+                  type="number"
+                  value={editForm.positionSize}
+                  onChange={e => setEditForm(prev => ({ ...prev, positionSize: Number(e.target.value) }))}
+                  className="h-8 text-xs font-mono bg-[#0a0e17] border-[#1e293b] text-[#e2e8f0]"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost" className="h-7 px-3 text-[10px] font-mono text-[#64748b]">Cancel</Button>
+            </DialogClose>
+            <Button
+              onClick={saveEditStrategy}
+              className="h-7 px-4 text-[10px] font-mono bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30 border border-[#d4af37]/30"
+            >
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
