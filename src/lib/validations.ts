@@ -35,7 +35,7 @@ export const brainActionSchema = z.object({
     'force_signal', 'validate_signals', 'evolve_systems',
     'update_growth', 'cleanup_data', 'get_capacity'
   ]),
-  params: z.record(z.unknown()).optional(),
+  params: z.record(z.string(), z.any()).optional(),
 });
 
 export const backtestCreateSchema = z.object({
@@ -74,6 +74,6 @@ export function validateOrError<T>(schema: z.ZodSchema<T>, data: unknown): { suc
   if (result.success) {
     return { success: true, data: result.data };
   }
-  const errors = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+  const errors = result.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
   return { success: false, error: errors };
 }
