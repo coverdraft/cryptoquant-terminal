@@ -33,6 +33,7 @@ interface ApiTokenData {
 // ============================================================
 
 function formatPrice(price: number) {
+  if (price == null || isNaN(price)) return '0.00';
   if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (price >= 1) return price.toFixed(2);
   if (price >= 0.001) return price.toFixed(4);
@@ -41,6 +42,7 @@ function formatPrice(price: number) {
 }
 
 function formatVolume(vol: number) {
+  if (vol == null || isNaN(vol)) return '0';
   if (vol >= 1e9) return `${(vol / 1e9).toFixed(1)}B`;
   if (vol >= 1e6) return `${(vol / 1e6).toFixed(1)}M`;
   if (vol >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
@@ -519,17 +521,17 @@ export function TokenFlow() {
                   </td>
                   <td className="py-0.5 px-1 text-right">
                     <span className={`mono-data text-[10px] ${token.priceChange5m >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {token.priceChange5m >= 0 ? '+' : ''}{token.priceChange5m.toFixed(1)}%
+                      {token.priceChange5m >= 0 ? '+' : ''}{(token.priceChange5m ?? 0).toFixed(1)}%
                     </span>
                   </td>
                   <td className="py-0.5 px-1 text-right">
                     <span className={`mono-data text-[10px] ${token.priceChange1h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {token.priceChange1h >= 0 ? '+' : ''}{token.priceChange1h.toFixed(1)}%
+                      {token.priceChange1h >= 0 ? '+' : ''}{(token.priceChange1h ?? 0).toFixed(1)}%
                     </span>
                   </td>
                   <td className="py-0.5 px-1 text-right">
                     <span className={`mono-data text-[10px] font-bold ${token.priceChange24h >= 0 ? 'text-emerald-400 green-glow-text' : 'text-red-400 red-glow-text'}`}>
-                      {token.priceChange24h >= 0 ? '+' : ''}{token.priceChange24h.toFixed(1)}%
+                      {token.priceChange24h >= 0 ? '+' : ''}{(token.priceChange24h ?? 0).toFixed(1)}%
                     </span>
                   </td>
                   <td className="py-0.5 px-1 text-right">

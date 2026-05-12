@@ -9,6 +9,7 @@ import { ChevronRight } from 'lucide-react';
 // ============================================================
 
 function formatPrice(price: number) {
+  if (price == null || isNaN(price)) return '$0.00';
   if (price >= 1000) return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (price >= 1) return `$${price.toFixed(2)}`;
   if (price >= 0.001) return `$${price.toFixed(4)}`;
@@ -79,7 +80,7 @@ function TickerStrip() {
               <span className="text-[9px] font-mono text-[#94a3b8] font-semibold">{item.symbol}</span>
               <span className="mono-data text-[9px] text-[#e2e8f0]">${formatPrice(item.price)}</span>
               <span className={`mono-data text-[9px] font-bold ${item.change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {item.change >= 0 ? '+' : ''}{item.change.toFixed(1)}%
+                {item.change >= 0 ? '+' : ''}{(item.change ?? 0).toFixed(1)}%
               </span>
               {item.history.length >= 2 && (
                 <TickerSparkline

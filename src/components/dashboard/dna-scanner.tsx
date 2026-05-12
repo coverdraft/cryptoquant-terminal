@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 
 function formatPrice(price: number) {
+  if (price == null || isNaN(price)) return '$0.00';
   if (price >= 1000) return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (price >= 1) return `$${price.toFixed(2)}`;
   if (price >= 0.001) return `$${price.toFixed(4)}`;
@@ -72,7 +73,7 @@ function MiniScoreBar({ label, value, maxVal = 100, color }: { label: string; va
       <div className="flex-1 h-2 bg-[#1a1f2e] rounded-full overflow-hidden">
         <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, backgroundColor: color, boxShadow: `0 0 8px ${color}40` }} />
       </div>
-      <span className="mono-data text-[10px] w-8" style={{ color }}>{value.toFixed(0)}</span>
+      <span className="mono-data text-[10px] w-8" style={{ color }}>{(value ?? 0).toFixed(0)}</span>
     </div>
   );
 }

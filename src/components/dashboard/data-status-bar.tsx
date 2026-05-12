@@ -96,27 +96,27 @@ export function DataStatusBar() {
   return (
     <div className="shrink-0">
       {/* Main Status Bar */}
-      <div className="status-bar flex items-center justify-between px-3 h-6 text-[#64748b]">
+      <div className="status-bar flex items-center justify-between px-2 sm:px-3 h-6 text-[#64748b] overflow-x-auto">
         {/* Left: Data counts */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <span className="flex items-center gap-1">
             <span className="text-[#3b82f6]">◆</span>
             <span>{tokenCount.toLocaleString()} tokens</span>
           </span>
-          <span className="text-[#1e293b]">│</span>
-          <span>{candleCount.toLocaleString()} candles</span>
-          <span className="text-[#1e293b]">│</span>
-          <span>{signalCount} signals</span>
-          <span className="text-[#1e293b]">│</span>
-          <span>{dnaCount} DNA</span>
-          <span className="text-[#1e293b]">│</span>
-          <span>{traderCount} traders</span>
-          <span className="text-[#1e293b]">│</span>
-          <span>{patternCount} patterns</span>
+          <span className="text-[#1e293b] hidden sm:inline">│</span>
+          <span className="hidden sm:inline">{candleCount.toLocaleString()} candles</span>
+          <span className="text-[#1e293b] hidden md:inline">│</span>
+          <span className="hidden md:inline">{signalCount} signals</span>
+          <span className="text-[#1e293b] hidden lg:inline">│</span>
+          <span className="hidden lg:inline">{dnaCount} DNA</span>
+          <span className="text-[#1e293b] hidden lg:inline">│</span>
+          <span className="hidden lg:inline">{traderCount} traders</span>
+          <span className="text-[#1e293b] hidden xl:inline">│</span>
+          <span className="hidden xl:inline">{patternCount} patterns</span>
         </div>
 
         {/* Center: Brain + Loader Status */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <span className="flex items-center gap-1">
             Brain:
             <span className={`font-bold ${
@@ -127,24 +127,24 @@ export function DataStatusBar() {
               {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth}
             </span>
           </span>
-          <span className="text-[#1e293b]">│</span>
-          <span className="flex items-center gap-1">
+          <span className="text-[#1e293b] hidden sm:inline">│</span>
+          <span className="hidden sm:flex items-center gap-1">
             Loader:
             <span className={`font-bold ${loaderStatus === 'IDLE' ? 'text-emerald-400' : 'text-yellow-400'}`}>
               {loaderStatus}
             </span>
           </span>
-          <span className="text-[#1e293b]">│</span>
-          <span>Enrich: {enrichmentPct}%</span>
+          <span className="text-[#1e293b] hidden md:inline">│</span>
+          <span className="hidden md:inline">Enrich: {enrichmentPct}%</span>
         </div>
 
         {/* Right: DB + Sync + Sources + Expand */}
-        <div className="flex items-center gap-3">
-          <span>DB: {formatDbSize(dbSizeKB)}</span>
-          <span className="text-[#1e293b]">│</span>
-          <span>Sync: {lastSync}</span>
-          <span className="text-[#1e293b]">│</span>
-          <span className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          <span className="hidden sm:inline">DB: {formatDbSize(dbSizeKB)}</span>
+          <span className="text-[#1e293b] hidden md:inline">│</span>
+          <span className="hidden md:inline">Sync: {lastSync}</span>
+          <span className="text-[#1e293b] hidden lg:inline">│</span>
+          <span className="hidden lg:flex items-center gap-1.5">
             API:
             <span className="data-dot data-dot-live" />
             <span className="text-emerald-400">DexScreener</span>

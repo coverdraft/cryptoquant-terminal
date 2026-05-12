@@ -164,21 +164,24 @@ function TopBar() {
   const growthPct = schedulerStatus?.capitalStrategy?.growthPct ?? 0;
   const schedulerRunning = schedulerStatus?.status === 'RUNNING';
 
+  const safeGrowthPct = growthPct ?? 0;
+
   const formatCapital = (v: number) => {
+    if (v == null || isNaN(v)) return '$0';
     if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
     if (v >= 1e3) return `$${(v / 1e3).toFixed(1)}K`;
     return `$${v.toFixed(0)}`;
   };
 
   return (
-    <div className="flex items-center justify-between px-3 h-9 bg-[#080b12] border-b border-[#1e293b] shrink-0">
+    <div className="flex items-center justify-between px-2 sm:px-3 h-9 bg-[#080b12] border-b border-[#1e293b] shrink-0">
       {/* Left: Logo + Status */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         <div className="flex items-center gap-1.5">
           <span className="text-[#3b82f6] font-mono text-xs font-bold tracking-wider blue-glow">
             CryptoQuant
           </span>
-          <span className="text-[#475569] font-mono text-[8px]">TERMINAL</span>
+          <span className="text-[#475569] font-mono text-[8px] hidden sm:inline">TERMINAL</span>
         </div>
         <div className="h-4 w-px bg-[#1e293b]" />
         <div className="flex items-center gap-1">
@@ -201,57 +204,57 @@ function TopBar() {
         </div>
       </div>
 
-      {/* Center: Key Metrics */}
-      <div className="flex items-center gap-4">
+      {/* Center: Key Metrics - responsive */}
+      <div className="flex items-center gap-1.5 sm:gap-3 lg:gap-4 overflow-x-auto">
         {/* Capital */}
-        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+        <div className="flex items-center gap-1 sm:gap-1.5 bg-[#0a0e17] px-1.5 sm:px-2 py-0.5 rounded border border-[#1e293b] shrink-0">
           <DollarSign className="h-3 w-3 text-[#3b82f6]" />
-          <span className="text-[8px] font-mono text-[#64748b]">CAPITAL</span>
+          <span className="text-[8px] font-mono text-[#64748b] hidden md:inline">CAPITAL</span>
           <span className="mono-data text-[10px] font-bold text-[#e2e8f0]">{formatCapital(capital)}</span>
-          <span className={`mono-data text-[9px] font-bold ${growthPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {growthPct >= 0 ? '+' : ''}{growthPct.toFixed(1)}%
+          <span className={`mono-data text-[9px] font-bold ${safeGrowthPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {safeGrowthPct >= 0 ? '+' : ''}{safeGrowthPct.toFixed(1)}%
           </span>
         </div>
 
         {/* Cycles */}
-        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+        <div className="flex items-center gap-1 sm:gap-1.5 bg-[#0a0e17] px-1.5 sm:px-2 py-0.5 rounded border border-[#1e293b] shrink-0">
           <Activity className="h-3 w-3 text-cyan-400" />
-          <span className="text-[8px] font-mono text-[#64748b]">CYCLES</span>
+          <span className="text-[8px] font-mono text-[#64748b] hidden lg:inline">CYCLES</span>
           <span className="mono-data text-[10px] font-bold text-cyan-400">{brainCycles}</span>
         </div>
 
         {/* Tokens */}
-        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+        <div className="flex items-center gap-1 sm:gap-1.5 bg-[#0a0e17] px-1.5 sm:px-2 py-0.5 rounded border border-[#1e293b] shrink-0">
           <BarChart3 className="h-3 w-3 text-[#3b82f6]" />
-          <span className="text-[8px] font-mono text-[#64748b]">TOKENS</span>
+          <span className="text-[8px] font-mono text-[#64748b] hidden lg:inline">TOKENS</span>
           <span className="mono-data text-[10px] font-bold text-[#e2e8f0]">{tokensTracked.toLocaleString()}</span>
         </div>
 
         {/* Signals */}
-        <div className="flex items-center gap-1.5 bg-[#0a0e17] px-2 py-0.5 rounded border border-[#1e293b]">
+        <div className="flex items-center gap-1 sm:gap-1.5 bg-[#0a0e17] px-1.5 sm:px-2 py-0.5 rounded border border-[#1e293b] shrink-0">
           <Radio className="h-3 w-3 text-amber-400" />
-          <span className="text-[8px] font-mono text-[#64748b]">SIGNALS</span>
+          <span className="text-[8px] font-mono text-[#64748b] hidden lg:inline">SIGNALS</span>
           <span className="mono-data text-[10px] font-bold text-amber-400">{totalSignals}</span>
         </div>
 
-        {/* Market */}
+        {/* Market - hide on small screens */}
         {marketSummary && (
           <>
-            <div className="h-4 w-px bg-[#1e293b]" />
-            <div className="flex items-center gap-1">
+            <div className="h-4 w-px bg-[#1e293b] hidden xl:block" />
+            <div className="flex items-center gap-1 hidden xl:flex">
               <span className="text-[#f59e0b] font-mono text-[9px] font-bold">BTC</span>
-              <span className="mono-data text-[10px] text-[#e2e8f0]">${marketSummary.btcPrice.toLocaleString()}</span>
+              <span className="mono-data text-[10px] text-[#e2e8f0]">${(marketSummary.btcPrice ?? 0).toLocaleString()}</span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 hidden xl:flex">
               <span className="text-[#627eea] font-mono text-[9px] font-bold">ETH</span>
-              <span className="mono-data text-[10px] text-[#e2e8f0]">${marketSummary.ethPrice.toLocaleString()}</span>
+              <span className="mono-data text-[10px] text-[#e2e8f0]">${(marketSummary.ethPrice ?? 0).toLocaleString()}</span>
             </div>
           </>
         )}
       </div>
 
-      {/* Right: Time */}
-      <div className="flex items-center gap-2">
+      {/* Right: Time - hide on small screens */}
+      <div className="flex items-center gap-2 shrink-0 hidden md:flex">
         <span className="mono-data text-[9px] text-[#475569]">{utcTime}</span>
       </div>
     </div>
@@ -269,7 +272,7 @@ function Sidebar() {
   return (
     <nav
       className={`flex flex-col h-full bg-[#0d1117] border-r border-[#1e293b] shrink-0 transition-all duration-200 ${
-        collapsed ? 'w-12' : 'w-[180px]'
+        collapsed ? 'w-10 sm:w-12' : 'w-[140px] sm:w-[180px]'
       }`}
     >
       {/* Nav Items */}

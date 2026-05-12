@@ -267,7 +267,7 @@ export function ChainHeatmap() {
                             {token.symbol}
                           </span>
                           <span className={`font-mono text-[7px] ${heatText} shrink-0 ml-0.5`}>
-                            {token.priceChange24h >= 0 ? '+' : ''}{token.priceChange24h.toFixed(1)}%
+                            {token.priceChange24h >= 0 ? '+' : ''}{(token.priceChange24h ?? 0).toFixed(1)}%
                           </span>
                         </div>
                       );

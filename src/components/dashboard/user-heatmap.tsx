@@ -6,6 +6,7 @@ import { useCryptoStore } from '@/store/crypto-store';
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 function formatPrice(price: number) {
+  if (price == null || isNaN(price)) return '0.00';
   if (price >= 1000) return price.toFixed(2);
   if (price >= 1) return price.toFixed(2);
   if (price >= 0.001) return price.toFixed(4);
