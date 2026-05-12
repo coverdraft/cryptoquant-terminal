@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateOrError, brainActionSchema } from '@/lib/validations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -74,11 +75,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { action, params = {} } = body;
-
-  if (!action) {
-    return NextResponse.json({ error: 'action is required' }, { status: 400 });
+  const validation = validateOrError(brainActionSchema, body);
+  if (!validation.success) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
   }
+
+  const { action, params = {} } = validation.data;
 
   // ---- LIGHTWEIGHT ACTIONS (no heavy imports) ----
   if (LIGHT_ACTIONS.has(action)) {

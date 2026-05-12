@@ -70,3 +70,27 @@ prisma/dev.db-wal
 
 # Scripts output
 /tmp/
+
+# PID files
+*.pid
+
+# Monitor output
+monitor-output.json
+
+# Upload directory (user data)
+/upload/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Backup files
+*.save
+*.bak
+*.tsxo

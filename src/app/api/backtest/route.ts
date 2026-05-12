@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { validateOrError, backtestCreateSchema } from '@/lib/validations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,10 +73,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { systemId, mode, periodStart, periodEnd, initialCapital, allocationMethod } = body as {
-      systemId?: string; mode?: string; periodStart?: string;
-      periodEnd?: string; initialCapital?: number; allocationMethod?: string;
-    };
+
+    const validation = validateOrError(backtestCreateSchema, body);
+    if (!validation.success) {
+      return NextResponse.json({ data: null, error: validation.error }, { status: 400 });
+    }
+
+    const { systemId, mode, periodStart, periodEnd, initialCapital } = validation.data;
 
     if (!systemId) {
       return NextResponse.json({ data: null, error: 'systemId is required' }, { status: 400 });
