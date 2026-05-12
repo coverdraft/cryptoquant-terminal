@@ -1165,6 +1165,167 @@ function AnalysisEmptyState() {
 }
 
 // ============================================================
+// SCENARIOS CARD (STANDARD / DEEP)
+// ============================================================
+
+function ScenariosCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
+  const scenarios = (analysis as any).scenarios;
+  if (!scenarios) return null;
+
+  const bullScenario = scenarios.bull || { probability: 0.35, targetPct: 15, description: 'Bullish scenario' };
+  const baseScenario = scenarios.base || { probability: 0.35, targetPct: 0, description: 'Base scenario' };
+  const bearScenario = scenarios.bear || { probability: 0.30, targetPct: -15, description: 'Bearish scenario' };
+
+  return (
+    <motion.div custom={index} variants={cardVariants} initial="hidden" animate="visible" exit="exit">
+      <Card className="bg-[#0d1117] border-[#1e293b]">
+        <CardHeader className="pb-2 px-4 pt-3">
+          <CardTitle className="flex items-center gap-2 text-xs">
+            <Target className="h-3.5 w-3.5 text-[#d4af37]" />
+            <span className="font-mono text-[10px] uppercase tracking-wider text-[#94a3b8]">
+              Scenario Analysis
+            </span>
+            <Badge variant="outline" className="text-[8px] font-mono border-[#2d3748] text-[#64748b] h-4 px-1.5 ml-1">
+              {(bullScenario.probability * 100).toFixed(0)}/{(baseScenario.probability * 100).toFixed(0)}/{(bearScenario.probability * 100).toFixed(0)}
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-3">
+          <div className="grid grid-cols-3 gap-3">
+            {/* Bull Scenario */}
+            <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-md p-3">
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingUp className="h-4 w-4 text-emerald-400" />
+                <span className="font-mono text-[10px] font-bold text-emerald-400 uppercase">Bull</span>
+                <span className="mono-data text-[10px] text-emerald-300 ml-auto">{(bullScenario.probability * 100).toFixed(0)}%</span>
+              </div>
+              <div className="mono-data text-lg font-bold text-emerald-400 mb-1.5">
+                +{bullScenario.targetPct}%
+              </div>
+              <div className="h-1.5 bg-[#1a1f2e] rounded-full overflow-hidden mb-2">
+                <motion.div
+                  className="h-full rounded-full bg-emerald-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${bullScenario.probability * 100}%` }}
+                  transition={{ duration: 0.8, ease: 'easeOut' }}
+                />
+              </div>
+              <p className="text-[9px] text-[#94a3b8] leading-relaxed">{bullScenario.description}</p>
+            </div>
+
+            {/* Base Scenario */}
+            <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-md p-3">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Minus className="h-4 w-4 text-yellow-400" />
+                <span className="font-mono text-[10px] font-bold text-yellow-400 uppercase">Base</span>
+                <span className="mono-data text-[10px] text-yellow-300 ml-auto">{(baseScenario.probability * 100).toFixed(0)}%</span>
+              </div>
+              <div className="mono-data text-lg font-bold text-yellow-400 mb-1.5">
+                {baseScenario.targetPct > 0 ? '+' : ''}{baseScenario.targetPct}%
+              </div>
+              <div className="h-1.5 bg-[#1a1f2e] rounded-full overflow-hidden mb-2">
+                <motion.div
+                  className="h-full rounded-full bg-yellow-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${baseScenario.probability * 100}%` }}
+                  transition={{ duration: 0.8, ease: 'easeOut', delay: 0.1 }}
+                />
+              </div>
+              <p className="text-[9px] text-[#94a3b8] leading-relaxed">{baseScenario.description}</p>
+            </div>
+
+            {/* Bear Scenario */}
+            <div className="bg-red-500/5 border border-red-500/20 rounded-md p-3">
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingDown className="h-4 w-4 text-red-400" />
+                <span className="font-mono text-[10px] font-bold text-red-400 uppercase">Bear</span>
+                <span className="mono-data text-[10px] text-red-300 ml-auto">{(bearScenario.probability * 100).toFixed(0)}%</span>
+              </div>
+              <div className="mono-data text-lg font-bold text-red-400 mb-1.5">
+                {bearScenario.targetPct}%
+              </div>
+              <div className="h-1.5 bg-[#1a1f2e] rounded-full overflow-hidden mb-2">
+                <motion.div
+                  className="h-full rounded-full bg-red-500"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${bearScenario.probability * 100}%` }}
+                  transition={{ duration: 0.8, ease: 'easeOut', delay: 0.2 }}
+                />
+              </div>
+              <p className="text-[9px] text-[#94a3b8] leading-relaxed">{bearScenario.description}</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+// ============================================================
+// QUICK STRATEGY CARD (Quick mode compact view)
+// ============================================================
+
+function QuickStrategyCard({ analysis }: { analysis: AnalysisData }) {
+  const strat = analysis.strategyRecommendation || {
+    strategy: 'WAIT_AND_MONITOR', direction: 'NEUTRAL', confidenceLevel: 0.5,
+    positionSizeRecommendation: '5%', stopLossRecommendation: '-10%', takeProfitRecommendation: '15%',
+  };
+  const risk = analysis.riskAssessment && typeof analysis.riskAssessment === 'object'
+    ? analysis.riskAssessment as { overallRisk: string; keyRisks: string[]; mitigatingFactors: string[]; blackSwanRisk: string }
+    : { overallRisk: (analysis as any).riskLevel || 'MEDIUM', keyRisks: [], mitigatingFactors: [], blackSwanRisk: 'LOW' };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* Compact Strategy */}
+      <Card className="bg-[#0d1117] border-[#1e293b]">
+        <CardContent className="p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Crosshair className="h-3.5 w-3.5 text-[#d4af37]" />
+            <span className="font-mono text-xs font-bold text-[#e2e8f0]">{strat.strategy}</span>
+            <DirectionBadge direction={strat.direction} />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-center">
+              <span className="text-[8px] font-mono text-[#64748b] uppercase">Pos</span>
+              <div className="mono-data text-[10px] font-bold text-[#e2e8f0]">{strat.positionSizeRecommendation}</div>
+            </div>
+            <div className="text-center">
+              <span className="text-[8px] font-mono text-[#64748b] uppercase">SL</span>
+              <div className="mono-data text-[10px] font-bold text-red-400">{strat.stopLossRecommendation}</div>
+            </div>
+            <div className="text-center">
+              <span className="text-[8px] font-mono text-[#64748b] uppercase">TP</span>
+              <div className="mono-data text-[10px] font-bold text-emerald-400">{strat.takeProfitRecommendation}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Compact Risk */}
+      <Card className="bg-[#0d1117] border-[#1e293b]">
+        <CardContent className="p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-3.5 w-3.5 text-[#d4af37]" />
+            <span className="font-mono text-xs text-[#94a3b8]">Risk</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <RiskBadge level={risk.overallRisk} />
+            {(analysis as any).riskScore != null && (
+              <span className="mono-data text-[10px] text-[#94a3b8]">{(analysis as any).riskScore}/100</span>
+            )}
+            {(analysis as any).suggestedTimeHorizon && (
+              <Badge variant="outline" className="text-[8px] font-mono border-[#2d3748] text-[#64748b] h-4 px-1.5">
+                {(analysis as any).suggestedTimeHorizon}
+              </Badge>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN COMPONENT
 // ============================================================
 
@@ -1228,24 +1389,59 @@ export function DeepAnalysisPanel() {
               {/* Verdict Summary */}
               <VerdictSummaryCard analysis={analysis} />
 
-              {/* Assessment Cards Row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <PhaseAssessmentCard analysis={analysis} index={0} />
-                <PatternAssessmentCard analysis={analysis} index={1} />
-                <TraderAssessmentCard analysis={analysis} index={2} />
-              </div>
+              {/* Assessment Cards Row - always show for STANDARD/DEEP, simplified for QUICK */}
+              {analysis.depth !== 'QUICK' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <PhaseAssessmentCard analysis={analysis} index={0} />
+                  <PatternAssessmentCard analysis={analysis} index={1} />
+                  <TraderAssessmentCard analysis={analysis} index={2} />
+                </div>
+              )}
 
-              {/* Evidence Matrix */}
+              {/* Evidence Matrix - always show */}
               <EvidenceMatrixCard analysis={analysis} index={3} />
 
-              {/* Strategy & Risk Row */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <StrategyRecommendationCard analysis={analysis} index={4} />
-                <RiskAssessmentCard analysis={analysis} index={5} />
-              </div>
+              {/* Scenarios Card - only for STANDARD and DEEP */}
+              {analysis.depth !== 'QUICK' && (analysis as any).scenarios && (
+                <ScenariosCard analysis={analysis} index={6} />
+              )}
 
-              {/* Reasoning Chain */}
-              <ReasoningChainCard analysis={analysis} />
+              {/* Strategy & Risk Row - always show for STANDARD/DEEP, simplified for QUICK */}
+              {analysis.depth !== 'QUICK' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <StrategyRecommendationCard analysis={analysis} index={4} />
+                  <RiskAssessmentCard analysis={analysis} index={5} />
+                </div>
+              )}
+
+              {/* Quick mode: show compact strategy */}
+              {analysis.depth === 'QUICK' && (
+                <QuickStrategyCard analysis={analysis} />
+              )}
+
+              {/* Reasoning Chain - DEEP only */}
+              {analysis.depth === 'DEEP' && (
+                <ReasoningChainCard analysis={analysis} />
+              )}
+
+              {/* Data Source info - DEEP only */}
+              {analysis.depth === 'DEEP' && (analysis as any).source && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-[#0d1117] border border-[#1e293b] rounded-lg">
+                  <Activity className="h-3 w-3 text-[#64748b]" />
+                  <span className="text-[9px] font-mono text-[#64748b]">
+                    Analysis Source: <span className="text-[#94a3b8] font-bold">{(analysis as any).source || 'RULE_BASED'}</span>
+                    {(analysis as any).riskScore != null && (
+                      <> &middot; Risk Score: <span className="text-[#94a3b8] font-bold">{(analysis as any).riskScore}/100</span></>
+                    )}
+                    {(analysis as any).urgencyLevel && (
+                      <> &middot; Urgency: <span className="text-[#94a3b8] font-bold">{(analysis as any).urgencyLevel}</span></>
+                    )}
+                    {(analysis as any).suggestedTimeHorizon && (
+                      <> &middot; Horizon: <span className="text-[#94a3b8] font-bold">{(analysis as any).suggestedTimeHorizon}</span></>
+                    )}
+                  </span>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

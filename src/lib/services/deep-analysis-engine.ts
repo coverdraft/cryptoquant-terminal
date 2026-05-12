@@ -209,6 +209,8 @@ const BOT_SWARM_RISK: Record<string, number> = {
 function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
   const { brainAnalysis: brain, patternScan, behavioralPrediction: behavior, symbol, chain, tokenAddress } = input;
   const depth = input.depth ?? 'STANDARD';
+  const isQuick = depth === 'QUICK';
+  const isDeep = depth === 'DEEP';
 
   // === FACTOR COLLECTION ===
   const bullishFactors: string[] = [];
@@ -217,22 +219,36 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
   const justification: string[] = [];
   const keyMonitorPoints: string[] = [];
 
+  // Depth-dependent factor limits
+  const maxBullFactors = isQuick ? 3 : isDeep ? 12 : 6;
+  const maxBearFactors = isQuick ? 3 : isDeep ? 12 : 6;
+  const maxNeutralFactors = isQuick ? 1 : isDeep ? 6 : 3;
+  const maxJustification = isQuick ? 2 : isDeep ? 10 : 5;
+  const maxMonitorPoints = isQuick ? 2 : isDeep ? 8 : 4;
+
   // Phase factors
   const phaseRisk = PHASE_RISK[brain.lifecyclePhase] ?? 50;
   if (['GROWTH', 'LEGACY'].includes(brain.lifecyclePhase)) {
     bullishFactors.push(`${brain.lifecyclePhase} lifecycle phase (favorable for upside)`);
+    if (isDeep) bullishFactors.push(`Phase momentum: ${brain.lifecyclePhase} tokens historically show ${brain.lifecyclePhase === 'GROWTH' ? 'sustained uptrend' : 'stability'}`);
   } else if (['GENESIS', 'DECLINE'].includes(brain.lifecyclePhase)) {
     bearishFactors.push(`${brain.lifecyclePhase} lifecycle phase (higher risk/uncertainty)`);
+    if (isDeep) bearishFactors.push(`${brain.lifecyclePhase} phase tokens typically experience ${brain.lifecyclePhase === 'GENESIS' ? 'extreme volatility in first hours' : 'prolonged downtrend pressure'}`);
   } else {
     neutralFactors.push(`${brain.lifecyclePhase} phase - neutral positioning`);
+    if (isDeep) neutralFactors.push(`INCIPIENT/FOMO phases often precede significant moves; direction depends on volume confirmation`);
   }
 
   // Regime factors
   const regimeRisk = REGIME_RISK[brain.regime] ?? 50;
   if (brain.regime === 'BULL') {
     bullishFactors.push(`Bull market regime with ${(brain.regimeConfidence * 100).toFixed(0)}% confidence`);
+    if (isDeep) bullishFactors.push(`Bull regime tailwind: historical data shows ${brain.regimeConfidence > 0.7 ? 'strong' : 'moderate'} upside bias in this regime`);
   } else if (brain.regime === 'BEAR') {
     bearishFactors.push(`Bear market regime with ${(brain.regimeConfidence * 100).toFixed(0)}% confidence`);
+    if (isDeep) bearishFactors.push(`Bear regime headwind: defensive positioning recommended; ${brain.regimeConfidence > 0.7 ? 'high' : 'moderate'} conviction of continued downside`);
+  } else if (brain.regime === 'TRANSITION' && isDeep) {
+    neutralFactors.push('Transition regime detected - market direction uncertain, reduced position sizing advisable');
   }
 
   // Pattern factors
@@ -242,13 +258,24 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
       if (patternScan.confluences.length > 0) {
         bullishFactors.push(`Pattern confluences: ${patternScan.confluences.map(c => c.pattern).join(', ')}`);
       }
+      if (isDeep) {
+        for (const bp of patternScan.bullishPatterns.slice(0, 3)) {
+          bullishFactors.push(`Bullish pattern: ${bp.pattern} on ${bp.timeframe} (confidence: ${(bp.confidence * 100).toFixed(0)}%)`);
+        }
+      }
     } else if (patternScan.overallSignal === 'BEARISH') {
       bearishFactors.push(`Candlestick patterns: ${patternScan.bearishPatterns.length} bearish signals (score: ${patternScan.overallScore.toFixed(2)})`);
+      if (isDeep) {
+        for (const bp of patternScan.bearishPatterns.slice(0, 3)) {
+          bearishFactors.push(`Bearish pattern: ${bp.pattern} on ${bp.timeframe} (confidence: ${(bp.confidence * 100).toFixed(0)}%)`);
+        }
+      }
     } else {
       neutralFactors.push(`Candlestick patterns: mixed/neutral (${patternScan.patterns.length} total)`);
     }
     if (patternScan.dominantPattern) {
       keyMonitorPoints.push(`Watch for ${patternScan.dominantPattern} pattern continuation or invalidation on ${patternScan.dominantTimeframe}`);
+      if (isDeep) keyMonitorPoints.push(`Pattern invalidation level: if price breaks ${patternScan.overallSignal === 'BULLISH' ? 'below support' : 'above resistance'}, pattern fails`);
     }
   }
 
@@ -256,28 +283,43 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
   if (behavior) {
     if (behavior.netFlowDirection === 'BULLISH') {
       bullishFactors.push(`Trader behavior: net bullish flow (score: ${behavior.netFlowScore.toFixed(2)})`);
+      if (isDeep) bullishFactors.push(`Flow momentum: ${behavior.netFlowScore > 0.7 ? 'strong' : 'moderate'} bullish conviction with ${(behavior.confidence * 100).toFixed(0)}% prediction reliability`);
     } else if (behavior.netFlowDirection === 'BEARISH') {
       bearishFactors.push(`Trader behavior: net bearish flow (score: ${behavior.netFlowScore.toFixed(2)})`);
+      if (isDeep) bearishFactors.push(`Flow momentum: ${behavior.netFlowScore < -0.7 ? 'strong' : 'moderate'} bearish conviction with ${(behavior.confidence * 100).toFixed(0)}% prediction reliability`);
     }
     if (behavior.archetypeBreakdown.length > 0) {
       const topArch = behavior.archetypeBreakdown[0];
       keyMonitorPoints.push(`Top trader archetype: ${topArch.archetype} (${topArch.dominantAction}, ${topArch.volumeShare.toFixed(0)}% volume)`);
+      if (isDeep && behavior.archetypeBreakdown.length > 1) {
+        const secondArch = behavior.archetypeBreakdown[1];
+        keyMonitorPoints.push(`Secondary archetype: ${secondArch.archetype} (${secondArch.dominantAction}, ${secondArch.volumeShare.toFixed(0)}% volume)`);
+      }
     }
     if (behavior.confidence > 0.7) {
       justification.push(`High behavioral prediction confidence (${(behavior.confidence * 100).toFixed(0)}%)`);
+    }
+    if (isDeep && behavior.archetypeBreakdown.length > 0) {
+      for (const arch of behavior.archetypeBreakdown.slice(0, 3)) {
+        justification.push(`[${arch.archetype}] ${arch.dominantAction} - ${(arch.volumeShare * 100).toFixed(1)}% volume share`);
+      }
     }
   }
 
   // Whale & smart money
   if (brain.whaleDirection === 'ACCUMULATING') {
     bullishFactors.push(`Whales accumulating (${(brain.whaleConfidence * 100).toFixed(0)}% confidence)`);
+    if (isDeep) bullishFactors.push(`Whale accumulation pattern: ${brain.whaleConfidence > 0.7 ? 'Large wallets consistently adding positions' : 'Moderate whale buying activity observed'}`);
   } else if (brain.whaleDirection === 'DISTRIBUTING') {
     bearishFactors.push(`Whales distributing (${(brain.whaleConfidence * 100).toFixed(0)}% confidence)`);
+    if (isDeep) bearishFactors.push(`Whale distribution alert: ${brain.whaleConfidence > 0.7 ? 'Large wallets actively selling into strength' : 'Some large wallet reduction observed'}`);
   }
   if (brain.smartMoneyFlow === 'INFLOW') {
     bullishFactors.push('Smart money inflow detected');
+    if (isDeep) bullishFactors.push('Smart money entry typically precedes significant price moves - monitor for acceleration');
   } else if (brain.smartMoneyFlow === 'OUTFLOW') {
     bearishFactors.push('Smart money outflow detected');
+    if (isDeep) bearishFactors.push('Smart money exit often signals impending correction - consider reducing exposure');
   }
 
   // Bot swarm
@@ -285,25 +327,41 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
   if (brain.botSwarmLevel === 'CRITICAL' || brain.botSwarmLevel === 'HIGH') {
     bearishFactors.push(`${brain.botSwarmLevel} bot swarm activity - retail front-running risk`);
     keyMonitorPoints.push('Monitor bot activity for changes - high bot presence increases slippage risk');
+    if (isDeep) {
+      bearishFactors.push(`Bot swarm impact: ${brain.botSwarmLevel === 'CRITICAL' ? 'Extreme MEV extraction risk, avoid market orders' : 'Elevated sandwich attack probability, use limit orders'}`);
+      keyMonitorPoints.push('Bot behavior can shift rapidly - set alerts for bot activity level changes');
+    }
+  } else if (isDeep && brain.botSwarmLevel === 'MEDIUM') {
+    neutralFactors.push('Moderate bot activity - exercise caution with order execution');
   }
 
   // Operability
   if (brain.operabilityLevel === 'PREMIUM' || brain.operabilityLevel === 'GOOD') {
     bullishFactors.push(`Operability: ${brain.operabilityLevel} (score: ${brain.operabilityScore}/100)`);
+    if (isDeep) bullishFactors.push(`High operability means lower slippage and better fill quality - favorable for both entry and exit execution`);
   } else if (brain.operabilityLevel === 'RISKY' || brain.operabilityLevel === 'UNOPERABLE') {
     bearishFactors.push(`Low operability: ${brain.operabilityLevel} (fees/slippage erode gains)`);
+    if (isDeep) bearishFactors.push(`Operability score ${brain.operabilityScore}/100 indicates ${brain.operabilityLevel === 'UNOPERABLE' ? 'severe' : 'significant'} execution risk - avoid large positions`);
   }
 
   // Anomaly
   if (brain.anomalyDetected) {
     neutralFactors.push(`Volume anomaly detected (score: ${brain.anomalyScore.toFixed(2)})`);
     keyMonitorPoints.push('Volume anomaly - could indicate catalyst event or manipulation');
+    if (isDeep) {
+      neutralFactors.push(`Anomaly score ${brain.anomalyScore.toFixed(2)} suggests ${brain.anomalyScore > 0.8 ? 'high probability of significant event' : 'moderate unusual activity'}`);
+      keyMonitorPoints.push('Anomalous volume patterns often precede major moves - prepare for increased volatility');
+    }
   }
 
   // Transition
   if (brain.isTransitioning) {
     neutralFactors.push('Token is transitioning between lifecycle phases');
     keyMonitorPoints.push('Phase transition in progress - direction uncertainty elevated');
+    if (isDeep) {
+      neutralFactors.push('Phase transitions are high-uncertainty periods - trend direction may reverse or accelerate sharply');
+      keyMonitorPoints.push('Monitor on-chain metrics closely during transition for early direction signals');
+    }
   }
 
   // === RISK SCORING ===
@@ -360,6 +418,18 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
     `Risk: ${riskLevel} (${riskScore.toFixed(0)}/100) | Bull factors: ${bullCount} | Bear factors: ${bearCount}`,
   );
 
+  // Depth-specific justification
+  if (isDeep) {
+    justification.push(`[DEEP] Phase: ${brain.lifecyclePhase} (risk contribution: ${phaseRisk.toFixed(0)}/100)`);
+    justification.push(`[DEEP] Regime: ${brain.regime} (risk contribution: ${regimeRisk.toFixed(0)}/100)`);
+    justification.push(`[DEEP] Bot risk: ${brain.botSwarmLevel} (risk contribution: ${botRisk.toFixed(0)}/100)`);
+    justification.push(`[DEEP] Operability: ${brain.operabilityLevel} (${brain.operabilityScore}/100)`);
+    if (patternScan) justification.push(`[DEEP] Pattern signal: ${patternScan.overallSignal} (${patternScan.patterns.length} patterns, score: ${patternScan.overallScore.toFixed(2)})`);
+    if (behavior) justification.push(`[DEEP] Trader flow: ${behavior.netFlowDirection} (score: ${behavior.netFlowScore.toFixed(2)}, confidence: ${(behavior.confidence * 100).toFixed(0)}%)`);
+  } else if (!isQuick) {
+    justification.push(`Phase: ${brain.lifecyclePhase} | Regime: ${brain.regime} | Bots: ${brain.botSwarmLevel}`);
+  }
+
   // === SCENARIOS ===
   const bullProb = Math.max(0.05, Math.min(0.8, 0.3 + netFactors * 0.08 - riskScore * 0.003));
   const bearProb = Math.max(0.05, Math.min(0.8, 0.3 - netFactors * 0.08 + riskScore * 0.003));
@@ -388,16 +458,62 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
     : '1-14 days';
 
   // === SUMMARY ===
-  const summary = `${symbol || tokenAddress.slice(0,8)} is in ${brain.lifecyclePhase} phase within a ${brain.regime} regime. `
-    + `${bullCount} bullish factors vs ${bearCount} bearish factors. `
-    + `Overall risk: ${riskLevel}. Recommendation: ${recommendation}.`
-    + (patternScan ? ` Candlestick patterns suggest ${patternScan.overallSignal} bias.` : '')
-    + (behavior ? ` Trader behavior: ${behavior.netFlowDirection}.` : '');
+  let summary: string;
+  if (isQuick) {
+    summary = `${symbol || tokenAddress.slice(0,8)}: ${recommendation} (risk: ${riskLevel}, confidence: ${(recommendationConfidence * 100).toFixed(0)}%). `
+      + `${bullCount} bull / ${bearCount} bear factors.`;
+  } else if (isDeep) {
+    summary = `${symbol || tokenAddress.slice(0,8)} is in ${brain.lifecyclePhase} phase within a ${brain.regime} regime (${(brain.regimeConfidence * 100).toFixed(0)}% confidence). `
+      + `Comprehensive analysis identifies ${bullCount} bullish factors vs ${bearCount} bearish factors (${neutralFactors.length} neutral). `
+      + `Overall risk: ${riskLevel} (${riskScore.toFixed(0)}/100). Recommendation: ${recommendation} with ${(recommendationConfidence * 100).toFixed(0)}% confidence.`
+      + (patternScan ? ` Candlestick analysis: ${patternScan.overallSignal} bias with ${patternScan.patterns.length} patterns detected (score: ${patternScan.overallScore.toFixed(2)}). ${patternScan.confluences.length > 0 ? `${patternScan.confluences.length} confluences confirmed across timeframes.` : 'No multi-timeframe confluences.'}` : '')
+      + (behavior ? ` Trader behavior: ${behavior.netFlowDirection} flow (${behavior.netFlowScore.toFixed(2)} score, ${behavior.archetypeBreakdown.length} archetypes identified).` : '')
+      + ` Maximum recommended position: ${maxPosition}% of capital. Suggested horizon: ${timeHorizon}.`;
+  } else {
+    summary = `${symbol || tokenAddress.slice(0,8)} is in ${brain.lifecyclePhase} phase within a ${brain.regime} regime. `
+      + `${bullCount} bullish factors vs ${bearCount} bearish factors. `
+      + `Overall risk: ${riskLevel}. Recommendation: ${recommendation}.`
+      + (patternScan ? ` Candlestick patterns suggest ${patternScan.overallSignal} bias.` : '')
+      + (behavior ? ` Trader behavior: ${behavior.netFlowDirection}.` : '');
+  }
 
-  const riskAssessment = `Risk level: ${riskLevel} (${riskScore.toFixed(0)}/100). `
-    + `Phase risk: ${phaseRisk.toFixed(0)}/100, Regime risk: ${regimeRisk.toFixed(0)}/100, Bot risk: ${botRisk.toFixed(0)}/100. `
-    + `Operability: ${brain.operabilityLevel} (${brain.operabilityScore}/100). `
-    + `Maximum recommended position: ${maxPosition}% of capital.`;
+  let riskAssessment: string;
+  if (isQuick) {
+    riskAssessment = `Risk: ${riskLevel} (${riskScore.toFixed(0)}/100). Max position: ${maxPosition}%.`;
+  } else if (isDeep) {
+    riskAssessment = `Risk level: ${riskLevel} (${riskScore.toFixed(0)}/100). `
+      + `Phase risk: ${phaseRisk.toFixed(0)}/100, Regime risk: ${regimeRisk.toFixed(0)}/100, Bot risk: ${botRisk.toFixed(0)}/100. `
+      + `Operability: ${brain.operabilityLevel} (${brain.operabilityScore}/100). `
+      + `Maximum recommended position: ${maxPosition}% of capital. `
+      + `Whale risk: ${brain.whaleDirection} (${(brain.whaleConfidence * 100).toFixed(0)}%). `
+      + `Smart money: ${brain.smartMoneyFlow}. `
+      + `Volatility regime: ${brain.volatilityRegime || 'NORMAL'}. `
+      + `Anomaly: ${brain.anomalyDetected ? `Detected (${brain.anomalyScore.toFixed(2)})` : 'None'}. `
+      + `Transition: ${brain.isTransitioning ? 'Yes - elevated uncertainty' : 'No'}.`;
+  } else {
+    riskAssessment = `Risk level: ${riskLevel} (${riskScore.toFixed(0)}/100). `
+      + `Phase risk: ${phaseRisk.toFixed(0)}/100, Regime risk: ${regimeRisk.toFixed(0)}/100, Bot risk: ${botRisk.toFixed(0)}/100. `
+      + `Operability: ${brain.operabilityLevel} (${brain.operabilityScore}/100). `
+      + `Maximum recommended position: ${maxPosition}% of capital.`;
+  }
+
+  // Apply depth-based factor limits
+  const limitedBull = bullishFactors.slice(0, maxBullFactors);
+  const limitedBear = bearishFactors.slice(0, maxBearFactors);
+  const limitedNeutral = neutralFactors.slice(0, maxNeutralFactors);
+  const limitedJustification = justification.slice(0, maxJustification);
+  const limitedMonitor = keyMonitorPoints.slice(0, maxMonitorPoints);
+
+  // Depth-specific scenario descriptions
+  const bullDesc = isDeep
+    ? `Bull case: Strong momentum continues with ${brain.regime === 'BULL' ? 'regime tailwind' : 'improving conditions'}. ${bullTarget}%+ upside over ${timeHorizon}. Key catalyst: ${limitedBull[0] || 'market dynamics'}.`
+    : `Strong momentum continues, ${bullTarget}%+ upside`;
+  const baseDesc = isDeep
+    ? `Base case: Sideways consolidation within ${baseTarget > 0 ? '+' : ''}${baseTarget}% range. ${limitedNeutral.length > 0 ? `Neutral factors: ${limitedNeutral[0]}.` : ''} Market awaiting direction catalyst.`
+    : `Sideways consolidation, ${baseTarget > 0 ? '+' : ''}${baseTarget}% move`;
+  const bearDesc = isDeep
+    ? `Bear case: Deterioration likely if ${limitedBear[0] || 'risk factors materialize'}. ${bearTarget}% decline over ${timeHorizon}. ${brain.botSwarmLevel === 'HIGH' || brain.botSwarmLevel === 'CRITICAL' ? 'Bot activity amplifies downside risk.' : ''}`
+    : `Deterioration, ${bearTarget}% decline`;
 
   return {
     tokenAddress,
@@ -410,15 +526,15 @@ function ruleBasedAnalysis(input: DeepAnalysisInput): DeepAnalysisResult {
     riskAssessment,
     recommendation,
     recommendationConfidence,
-    justification,
-    bullishFactors,
-    bearishFactors,
-    neutralFactors,
-    keyMonitorPoints,
+    justification: limitedJustification,
+    bullishFactors: limitedBull,
+    bearishFactors: limitedBear,
+    neutralFactors: limitedNeutral,
+    keyMonitorPoints: limitedMonitor,
     scenarios: {
-      bull: { probability: bullProb, targetPct: bullTarget, description: `Strong momentum continues, ${bullTarget}%+ upside` },
-      base: { probability: baseProb, targetPct: baseTarget, description: `Sideways consolidation, ${baseTarget > 0 ? '+' : ''}${baseTarget}% move` },
-      bear: { probability: bearProb, targetPct: bearTarget, description: `Deterioration, ${bearTarget}% decline` },
+      bull: { probability: bullProb, targetPct: bullTarget, description: bullDesc },
+      base: { probability: baseProb, targetPct: baseTarget, description: baseDesc },
+      bear: { probability: bearProb, targetPct: bearTarget, description: bearDesc },
     },
     riskLevel,
     riskScore,
@@ -464,28 +580,35 @@ ${behavior ? `- Trader Behavior: ${behavior.netFlowDirection} (flow: ${behavior.
 - Evidence: ${brain.evidence.slice(0, 5).join('; ') || 'none'}
 `.trim();
 
-    const prompt = `You are a professional crypto analyst. Analyze the following token data and provide a structured assessment.
+    const depthInstruction = input.depth === 'DEEP'
+      ? 'Provide a COMPREHENSIVE deep analysis with detailed reasoning, 5-8 bullish/bearish factors, detailed scenario narratives, specific entry/exit conditions, and risk breakdowns. Include specific price levels where possible.'
+      : input.depth === 'QUICK'
+      ? 'Provide a BRIEF quick scan summary. Keep it concise: 1-2 bullish/bearish factors, short summary, basic recommendation.'
+      : 'Provide a balanced standard analysis with moderate detail.';
+
+    const maxFactors = input.depth === 'DEEP' ? 8 : input.depth === 'QUICK' ? 2 : 4;
+
+    const prompt = `You are a professional crypto analyst. ${depthInstruction}
 
 ${context}
 
 Respond in this EXACT JSON format (no markdown, no code blocks):
 {
-  "summary": "2-3 sentence narrative summary",
-  "riskAssessment": "1-2 sentence risk assessment",
+  "summary": "${input.depth === 'DEEP' ? '4-5 sentence comprehensive narrative' : input.depth === 'QUICK' ? '1-2 sentence brief summary' : '2-3 sentence narrative summary'}",
+  "riskAssessment": "${input.depth === 'DEEP' ? '2-3 sentence detailed risk assessment with specific risk categories' : '1-2 sentence risk assessment'}",
   "recommendation": "STRONG_BUY|BUY|HOLD|REDUCE|SELL|AVOID",
   "confidence": 0.0-1.0,
-  "bullishFactors": ["factor1", "factor2"],
-  "bearishFactors": ["factor1", "factor2"],
-  "keyMonitorPoints": ["point1", "point2"],
-  "bullScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "text"},
-  "baseScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "text"},
-  "bearScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "text"},
+  "bullishFactors": ["factor1", "factor2" ${input.depth === 'DEEP' ? ', "factor3", "factor4"' : ''}],
+  "bearishFactors": ["factor1", "factor2" ${input.depth === 'DEEP' ? ', "factor3", "factor4"' : ''}],
+  "keyMonitorPoints": ["point1", "point2" ${input.depth === 'DEEP' ? ', "point3", "point4"' : ''}],
+  "bullScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "${input.depth === 'DEEP' ? 'Detailed bull case with specific catalysts and price targets' : 'Bull case description'}"},
+  "baseScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "${input.depth === 'DEEP' ? 'Detailed base case with range expectations' : 'Base case description'}"},
+  "bearScenario": {"probability": 0.0-1.0, "targetPct": number, "description": "${input.depth === 'DEEP' ? 'Detailed bear case with specific risks and invalidation levels' : 'Bear case description'}"},
   "riskLevel": "VERY_LOW|LOW|MEDIUM|HIGH|VERY_HIGH",
   "riskScore": 0-100,
   "maxPositionPct": 1-10,
   "timeHorizon": "text",
-  "urgency": "IMMEDIATE|HIGH|MEDIUM|LOW"
-}`;
+  "urgency": "IMMEDIATE|HIGH|MEDIUM|LOW"${input.depth === 'DEEP' ? ',\\n  "entryConditions": ["condition1", "condition2", "condition3"],\\n  "exitConditions": ["condition1", "condition2", "condition3"],\\n  "invalidationLevel": "price or condition that invalidates the thesis",\\n  "keyAssumptions": ["assumption1", "assumption2"]' : ''}\n}`;
 
     const completion = await zai.chat.completions.create({
       messages: [

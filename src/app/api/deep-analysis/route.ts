@@ -60,7 +60,9 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
     blackSwanRisk: result.riskLevel === 'EXTREME' ? 'ELEVATED' : 'LOW',
   };
 
-  // Build strategy recommendation
+  // Build strategy recommendation (depth-dependent)
+  const isDeep = result.depth === 'DEEP';
+  const isQuick = result.depth === 'QUICK';
   const strategyRecommendation: DeepAnalysis['strategyRecommendation'] = {
     strategy: verdictAction.includes('BUY') ? 'LONG_ENTRY' : verdictAction.includes('SELL') ? 'SHORT_OR_EXIT' : 'WAIT_AND_MONITOR',
     direction: verdictAction.includes('BUY') ? 'LONG' : verdictAction.includes('SELL') ? 'SHORT' : 'NEUTRAL',
@@ -68,22 +70,64 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
     positionSizeRecommendation: `${result.maxRecommendedPositionPct || 5}% of portfolio`,
     stopLossRecommendation: `${((result.scenarios?.bear?.targetPct || -10)).toFixed(1)}% from entry`,
     takeProfitRecommendation: `${((result.scenarios?.bull?.targetPct || 15)).toFixed(1)}% from entry`,
-    entryConditions: verdictAction.includes('BUY') ? ['Wait for confirmation candle', 'Check volume increase'] : ['N/A'],
-    exitConditions: verdictAction.includes('SELL') ? ['Exit on next resistance test', 'Trail stop loss'] : ['Hold until trend reversal'],
+    entryConditions: isDeep
+      ? (verdictAction.includes('BUY') ? ['Wait for confirmation candle on 1H timeframe', 'Verify volume increase >150% avg', 'Check smart money flow alignment', 'Validate pattern breakout above resistance'] : ['N/A - No long entry recommended'])
+      : isQuick
+      ? (verdictAction.includes('BUY') ? ['Confirmation candle required'] : ['N/A'])
+      : (verdictAction.includes('BUY') ? ['Wait for confirmation candle', 'Check volume increase'] : ['N/A']),
+    exitConditions: isDeep
+      ? (verdictAction.includes('SELL') ? ['Exit on next resistance test', 'Trail stop loss at 5% below recent high', 'Monitor whale wallet movements', 'Watch for regime change signals'] : ['Hold until trend reversal signal', 'Trail stop at 10% below recent high', 'Monitor volume divergence'])
+      : isQuick
+      ? (verdictAction.includes('SELL') ? ['Exit at resistance'] : ['Hold until reversal'])
+      : (verdictAction.includes('SELL') ? ['Exit on next resistance test', 'Trail stop loss'] : ['Hold until trend reversal']),
   };
 
-  // Build evidence matrix
-  const pros = (result.bullishFactors || []).map(f => ({ factor: f, weight: 0.7, explanation: f }));
-  const cons = (result.bearishFactors || []).map(f => ({ factor: f, weight: 0.6, explanation: f }));
-  const neutrals = (result.neutralFactors || []).map(f => ({ factor: f, weight: 0.5, explanation: f }));
+  // Build evidence matrix (depth-dependent weights)
+  const bullWeight = isQuick ? 0.6 : isDeep ? 0.8 : 0.7;
+  const bearWeight = isQuick ? 0.5 : isDeep ? 0.7 : 0.6;
+  const neutralWeight = isQuick ? 0.3 : isDeep ? 0.5 : 0.4;
+  const pros = (result.bullishFactors || []).map((f, i) => ({
+    factor: f,
+    weight: Math.min(1, bullWeight + (isDeep ? i * 0.02 : 0)),
+    explanation: isDeep ? f : f,
+  }));
+  const cons = (result.bearishFactors || []).map((f, i) => ({
+    factor: f,
+    weight: Math.min(1, bearWeight + (isDeep ? i * 0.02 : 0)),
+    explanation: isDeep ? f : f,
+  }));
+  const neutrals = (result.neutralFactors || []).map(f => ({
+    factor: f,
+    weight: neutralWeight,
+    explanation: f,
+  }));
 
-  // Build reasoning chain
+  // Build reasoning chain (depth-dependent)
+  const maxJustification = isQuick ? 3 : isDeep ? 12 : 6;
   const reasoningChain = [
-    `Risk Level: ${result.riskLevel || 'MEDIUM'} (Score: ${result.riskScore || 50}/100)`,
-    `Source: ${result.source || 'RULE_BASED'}`,
-    `Confidence: ${((result.recommendationConfidence || 0.5) * 100).toFixed(0)}%`,
-    ...result.justification?.slice(0, 5) || [],
+    `[RISK] Risk Level: ${result.riskLevel || 'MEDIUM'} (Score: ${result.riskScore || 50}/100)`,
+    `[DATA] Source: ${result.source || 'RULE_BASED'}`,
+    `[VERDICT] Confidence: ${((result.recommendationConfidence || 0.5) * 100).toFixed(0)}%`,
+    ...result.justification?.slice(0, maxJustification) || [],
   ];
+  if (isDeep && result.scenarios) {
+    reasoningChain.push(
+      `[SCENARIO] Bull: ${(result.scenarios.bull.probability * 100).toFixed(0)}% prob, +${result.scenarios.bull.targetPct}%`,
+      `[SCENARIO] Base: ${(result.scenarios.base.probability * 100).toFixed(0)}% prob, ${result.scenarios.base.targetPct > 0 ? '+' : ''}${result.scenarios.base.targetPct}%`,
+      `[SCENARIO] Bear: ${(result.scenarios.bear.probability * 100).toFixed(0)}% prob, ${result.scenarios.bear.targetPct}%`,
+    );
+    if (result.keyMonitorPoints?.length) {
+      for (const pt of result.keyMonitorPoints.slice(0, 4)) {
+        reasoningChain.push(`[DATA GAPS] ${pt}`);
+      }
+    }
+  }
+  if (result.urgencyLevel) {
+    reasoningChain.push(`[VERDICT] Urgency: ${result.urgencyLevel}`);
+  }
+  if (result.suggestedTimeHorizon) {
+    reasoningChain.push(`[STRATEGY] Time Horizon: ${result.suggestedTimeHorizon}`);
+  }
 
   return {
     tokenAddress: result.tokenAddress,
