@@ -228,7 +228,7 @@ export function SignalLiveFeed() {
     return signalsData.map((s) => ({
       id: s.id,
       type: s.type,
-      tokenSymbol: s.tokenSymbol || s.tokenId?.slice(0, 8) || '--',
+      tokenSymbol: s.tokenSymbol || '--',
       chain: normalizeChainName(s.chain),
       direction: s.direction || 'NEUTRAL',
       confidence: s.confidence,

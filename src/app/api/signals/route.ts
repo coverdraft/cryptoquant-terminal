@@ -29,22 +29,35 @@ export async function GET(request: NextRequest) {
     });
 
     // Flatten token data so frontend gets tokenSymbol + chain directly
-    // Extract symbol from description as fallback when token relation is missing
+    // Extract symbol from multiple fallback sources when token relation is missing
     const mapped = signals.map(s => {
       let symbol = s.token?.symbol ?? null;
+      let name = s.token?.name ?? null;
+      let chain = s.token?.chain ?? null;
+
+      // Fallback 1: Extract from description
       if (!symbol && s.description) {
-        // Try to extract token symbol from the signal description
-        // Common patterns: "Rug pull risk: SYMBOL dropped...", "Breakout: SYMBOL up..."
         const match = s.description.match(/:\s*([A-Z][A-Z0-9]{1,10})\s/);
         if (match) symbol = match[1];
       }
+
+      // Fallback 2: Extract from metadata JSON
+      if (!symbol && s.metadata) {
+        try {
+          const meta = typeof s.metadata === 'string' ? JSON.parse(s.metadata) : s.metadata;
+          if (meta.tokenSymbol) symbol = meta.tokenSymbol as string;
+          if (meta.chain && !chain) chain = meta.chain as string;
+          if (meta.tokenName && !name) name = meta.tokenName as string;
+        } catch {}
+      }
+
       return {
         id: s.id,
         type: s.type,
         tokenId: s.tokenId,
-        tokenSymbol: symbol,
-        tokenName: s.token?.name ?? null,
-        chain: s.token?.chain ?? null,
+        tokenSymbol: symbol || 'Unknown',
+        tokenName: name,
+        chain,
         confidence: s.confidence,
         direction: s.direction,
         description: s.description,

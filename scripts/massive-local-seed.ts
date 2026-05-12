@@ -112,7 +112,7 @@ async function main() {
     const batchSize = 500;
     
     for (let batch = 0; batch < Math.ceil(needed / batchSize); batch++) {
-      const tokens = [];
+      const tokens: any[] = [];
       const batchCount = Math.min(batchSize, needed - batch * batchSize);
       
       for (let i = 0; i < batchCount; i++) {
@@ -172,7 +172,7 @@ async function main() {
     const targetCount = 550;
     
     for (let batch = 0; batch < Math.ceil(targetCount / batchSize); batch++) {
-      const traders = [];
+      const traders: any[] = [];
       const batchCount = Math.min(batchSize, targetCount - batch * batchSize);
       
       for (let i = 0; i < batchCount; i++) {
@@ -418,7 +418,7 @@ async function main() {
     
     const BATCH = 500;
     for (let i = 0; i < candles.length; i += BATCH) {
-      try { await prisma.priceCandle.createMany({ data: candles.slice(i, i + BATCH), skipDuplicates: false }); } catch { /* skip */ }
+      try { await (prisma.priceCandle.createMany as any)({ data: candles.slice(i, i + BATCH), skipDuplicates: false }); } catch { /* skip */ }
     }
     console.log(`[Candles] ${candles.length} generated`);
   }
@@ -483,7 +483,7 @@ async function main() {
     
     const BATCH = 200;
     for (let i = 0; i < txs.length; i += BATCH) {
-      try { await prisma.traderTransaction.createMany({ data: txs.slice(i, i + BATCH), skipDuplicates: false }); } catch { /* skip */ }
+      try { await (prisma.traderTransaction.createMany as any)({ data: txs.slice(i, i + BATCH), skipDuplicates: false }); } catch { /* skip */ }
     }
     console.log(`[Transactions] ${txs.length} created`);
   }
@@ -497,7 +497,7 @@ async function main() {
     const traders = await prisma.trader.findMany({ take: 300, select: { id: true } });
     const patterns = ['ACCUMULATOR', 'DUMPER', 'SCALPER', 'SWING_TRADER', 'DIAMOND_HANDS', 'MOMENTUM_RIDER', 'CONTRARIAN', 'SNIPER_ENTRY', 'WASH_TRADER', 'COPY_CAT'];
     
-    const bps = [];
+    const bps: any[] = [];
     for (const trader of traders) {
       const numPatterns = randInt(1, 3);
       for (let p = 0; p < numPatterns; p++) {

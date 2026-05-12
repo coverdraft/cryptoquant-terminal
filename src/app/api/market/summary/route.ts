@@ -146,15 +146,15 @@ async function fetchFromCoinGecko() {
 async function fetchFromDatabase() {
   // Get BTC, ETH, SOL from our database
   const btc = await db.token.findFirst({
-    where: { symbol: { equals: 'BTC', mode: 'insensitive' } },
+    where: { symbol: 'BTC' },
     select: { priceUsd: true, marketCap: true },
   });
   const eth = await db.token.findFirst({
-    where: { symbol: { equals: 'ETH', mode: 'insensitive' } },
+    where: { symbol: 'ETH' },
     select: { priceUsd: true, marketCap: true },
   });
   const sol = await db.token.findFirst({
-    where: { symbol: { equals: 'SOL', mode: 'insensitive' } },
+    where: { symbol: 'SOL' },
     select: { priceUsd: true, marketCap: true },
   });
 

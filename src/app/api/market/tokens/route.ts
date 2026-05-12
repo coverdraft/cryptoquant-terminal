@@ -32,7 +32,7 @@ interface TokenData {
   priceChange15m: number;
   priceChange1h: number;
   priceChange24h: number;
-  priceChange7d: number;
+  priceChange6h: number;
   riskScore?: number;
   status: 'LIVE' | 'ACTIVE' | 'DISCOVERED';
   pairAddress?: string | null;
@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
         priceChange15m: t.priceChange15m,
         priceChange1h: t.priceChange1h,
         priceChange24h: t.priceChange24h,
-        priceChange7d: t.priceChange6h,
+        priceChange6h: t.priceChange6h,
         riskScore: t.dna?.riskScore ?? undefined,
         status,
         pairAddress: t.pairAddress,

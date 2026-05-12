@@ -32,7 +32,7 @@ function mapWsToken(t: any): TokenData {
     priceChange24h: t.priceChange24h ?? 0,
     riskScore: t.riskScore ?? 50,
     priceHistory: t.priceHistory,
-  };
+  } as TokenData;
 }
 
 /**

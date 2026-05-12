@@ -241,7 +241,7 @@ async function generateSmartMoneyWallets() {
   const batchSize = 50;
   
   for (let batch = 0; batch < Math.ceil(targetCount / batchSize); batch++) {
-    const traders = [];
+    const traders: any[] = [];
     
     for (let i = 0; i < batchSize; i++) {
       const idx = batch * batchSize + i;
@@ -321,7 +321,7 @@ async function generateSmartMoneyWallets() {
     }
     
     try {
-      await prisma.trader.createMany({ data: traders, skipDuplicates: true });
+      await (prisma.trader.createMany as any)({ data: traders, skipDuplicates: true });
       console.log(`[Traders] Batch ${batch + 1}: ${traders.length} created`);
     } catch (err: any) {
       console.log(`[Traders] Batch ${batch + 1} error: ${err.message}`);
@@ -654,7 +654,7 @@ async function generatePriceCandles() {
   const BATCH = 500;
   for (let i = 0; i < candles.length; i += BATCH) {
     try {
-      await prisma.priceCandle.createMany({ data: candles.slice(i, i + BATCH), skipDuplicates: true });
+      await (prisma.priceCandle.createMany as any)({ data: candles.slice(i, i + BATCH), skipDuplicates: true });
     } catch (err: any) {
       // Skip unique constraint errors
     }
@@ -766,7 +766,7 @@ async function generateTraderTransactions() {
   const BATCH = 200;
   for (let i = 0; i < txs.length; i += BATCH) {
     try {
-      await prisma.traderTransaction.createMany({ data: txs.slice(i, i + BATCH), skipDuplicates: true });
+      await (prisma.traderTransaction.createMany as any)({ data: txs.slice(i, i + BATCH), skipDuplicates: true });
     } catch { /* skip */ }
   }
   
