@@ -28,7 +28,22 @@ export async function GET(request: NextRequest) {
       take: limit,
     });
 
-    return NextResponse.json({ signals });
+    // Flatten token data so frontend gets tokenSymbol + chain directly
+    const mapped = signals.map(s => ({
+      id: s.id,
+      type: s.type,
+      tokenId: s.tokenId,
+      tokenSymbol: s.token?.symbol ?? null,
+      chain: s.token?.chain ?? null,
+      confidence: s.confidence,
+      direction: s.direction,
+      description: s.description,
+      priceTarget: s.priceTarget,
+      metadata: s.metadata,
+      createdAt: s.createdAt,
+    }));
+
+    return NextResponse.json({ signals: mapped });
   } catch (error) {
     console.error('Error fetching signals:', error);
     return NextResponse.json({ error: 'Failed to fetch signals' }, { status: 500 });

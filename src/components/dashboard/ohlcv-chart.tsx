@@ -37,7 +37,10 @@ interface OHLCVCandle {
 }
 
 interface OHLCVResponse {
-  data: OHLCVCandle[];
+  candles: OHLCVCandle[];
+  timeframe?: string;
+  source?: string;
+  count?: number;
 }
 
 interface OHLCVChartProps {
@@ -294,7 +297,7 @@ export function OHLCVChart({ tokenAddress, chain, timeframes }: OHLCVChartProps)
         const res = await fetch(`/api/market/ohlcv?${params.toString()}`);
         if (!res.ok) throw new Error('Failed to fetch OHLCV data');
         const json: OHLCVResponse = await res.json();
-        return json.data || [];
+        return json.candles || [];
       } catch {
         return [];
       }

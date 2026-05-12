@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export interface TokenData {
   id: string;
+  address?: string;
   symbol: string;
   name: string;
   chain: string;

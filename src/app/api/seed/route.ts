@@ -463,6 +463,82 @@ async function runSeed() {
     results.totalEnriched = await db.token.count({ where: { liquidity: { gt: 0 } } });
   } catch { /* skip */ }
 
+  // ============================================================
+  // STEP 8: Pre-load OHLCV candles for top tokens (CoinGecko)
+  // ============================================================
+  try {
+    console.log('[Seed] === STEP 8: Pre-loading OHLCV candles for top tokens ===');
+    const { coinGeckoClient } = await import('@/lib/services/coingecko-client');
+
+    const topTokens = await db.token.findMany({
+      where: { volume24h: { gt: 1000000 } },
+      orderBy: { volume24h: 'desc' },
+      take: 20,
+    });
+
+    let candlesCreated = 0;
+    for (const token of topTokens) {
+      try {
+        // Try to fetch 7-day OHLCV from CoinGecko
+        const coinId = token.address;
+        if (!coinId || coinId.length < 3) continue;
+
+        const ohlcv = await coinGeckoClient.getOHLCV(coinId, 7);
+        if (ohlcv && ohlcv.length > 0) {
+          const chain = token.chain || 'ALL';
+          for (const candle of ohlcv) {
+            try {
+              await db.priceCandle.upsert({
+                where: {
+                  tokenAddress_chain_timeframe_timestamp: {
+                    tokenAddress: token.address,
+                    chain,
+                    timeframe: '4h',
+                    timestamp: new Date(candle.timestamp),
+                  },
+                },
+                create: {
+                  tokenAddress: token.address,
+                  chain,
+                  timeframe: '4h',
+                  timestamp: new Date(candle.timestamp),
+                  open: candle.open,
+                  high: candle.high,
+                  low: candle.low,
+                  close: candle.close,
+                  volume: 0,
+                  source: 'coingecko',
+                },
+                update: {
+                  open: candle.open,
+                  high: candle.high,
+                  low: candle.low,
+                  close: candle.close,
+                },
+              });
+              candlesCreated++;
+            } catch { /* skip duplicate */ }
+          }
+          console.log(`[Seed] ${token.symbol}: ${ohlcv.length} candles stored`);
+        }
+
+        // Rate limit between tokens
+        await new Promise(r => setTimeout(r, 2000));
+      } catch {
+        // Skip tokens that CoinGecko can't resolve
+      }
+    }
+    console.log(`[Seed] OHLCV: ${candlesCreated} candles created for top tokens`);
+  } catch (err) {
+    console.warn('[Seed] OHLCV pre-load failed:', err);
+  }
+
+  // Update final counts
+  try {
+    results.totalSeeded = await db.token.count();
+    results.totalEnriched = await db.token.count({ where: { liquidity: { gt: 0 } } });
+  } catch { /* skip */ }
+
   console.log(`[Seed] === SEED COMPLETE: ${results.totalSeeded} tokens, ${results.dnaCreated} DNA, ${results.signalsCreated} signals ===`);
   return results;
 }

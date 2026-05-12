@@ -434,7 +434,7 @@ function MainContent() {
         </div>
         <div className="flex-1">
           {selectedToken ? (
-            <OHLCVChart tokenAddress={selectedToken.id} chain={selectedToken.chain} />
+            <OHLCVChart tokenAddress={selectedToken.address || selectedToken.id} chain={selectedToken.chain} />
           ) : (
             <div className="flex flex-col items-center justify-center h-full bg-[#0d1117] border border-[#1e293b] rounded-lg">
               <BarChart3 className="h-8 w-8 text-[#475569] mb-2" />

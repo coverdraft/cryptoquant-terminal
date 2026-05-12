@@ -18,6 +18,7 @@ let autoSeedTriggered = false;
 function mapWsToken(t: any): TokenData {
   return {
     id: t.id || t.address || t.symbol,
+    address: t.address || t.id,
     symbol: t.symbol,
     name: t.name,
     chain: t.chain,
@@ -67,6 +68,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
           tokensData.tokens.map((t: any) => ({
             ...t,
             id: t.id || t.address,
+            address: t.address || t.id,
             priceChange5m: t.priceChange5m || 0,
             priceChange15m: t.priceChange15m || 0,
             priceHistory: Array.from({ length: 20 }, () =>
@@ -128,6 +130,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             data.tokens.map((t: any) => ({
               ...t,
               id: t.id || t.address,
+              address: t.address || t.id,
               priceChange5m: t.priceChange5m || 0,
               priceChange15m: t.priceChange15m || 0,
               priceHistory: Array.from({ length: 20 }, () =>

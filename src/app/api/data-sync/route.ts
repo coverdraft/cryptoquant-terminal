@@ -93,7 +93,7 @@ async function runDataSync(chain: string) {
     const topTokens = await db.token.findMany({
       where: { liquidity: { equals: 0 }, volume24h: { gt: 0 } },
       orderBy: { volume24h: 'desc' },
-      take: 100,
+      take: 500,
     });
 
     if (topTokens.length > 0) {
@@ -216,7 +216,7 @@ async function runDataSync(chain: string) {
         address: { not: '' },
       },
       orderBy: { volume24h: 'desc' },
-      take: 20,
+      take: 50,
     });
 
     for (const token of topTokensWithAddress) {

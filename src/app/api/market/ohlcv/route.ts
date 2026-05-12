@@ -44,23 +44,32 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Query candles from DB directly
+    // Resolve tokenAddress: if it looks like a CUID (DB id), look up the actual address
+    let resolvedAddress = tokenAddress;
+    if (tokenAddress.startsWith('cl') || tokenAddress.startsWith('cm')) {
+      const token = await db.token.findUnique({ where: { id: tokenAddress } });
+      if (token) {
+        resolvedAddress = token.address;
+      }
+    }
+
+    // Query candles from DB directly using resolved address
     let candles = await db.priceCandle.findMany({
-      where: { tokenAddress, timeframe },
+      where: { tokenAddress: resolvedAddress, timeframe },
       orderBy: { timestamp: 'desc' },
       take: limit,
     });
 
     // If no candles found (or force refresh), try on-demand fetch from CoinGecko
     if (candles.length === 0 || forceRefresh) {
-      console.log(`[/api/market/ohlcv] No ${timeframe} candles for ${tokenAddress}, fetching on-demand...`);
+      console.log(`[/api/market/ohlcv] No ${timeframe} candles for ${resolvedAddress}, fetching on-demand...`);
 
-      const fetchedCandles = await fetchOHLCVOnDemand(tokenAddress, timeframe, db);
+      const fetchedCandles = await fetchOHLCVOnDemand(resolvedAddress, timeframe, db);
 
       if (fetchedCandles > 0) {
         // Re-query after fetching
         candles = await db.priceCandle.findMany({
-          where: { tokenAddress, timeframe },
+          where: { tokenAddress: resolvedAddress, timeframe },
           orderBy: { timestamp: 'desc' },
           take: limit,
         });
@@ -70,7 +79,7 @@ export async function GET(request: NextRequest) {
       if (candles.length === 0) {
         // Try to find ANY candles for this token
         const anyCandles = await db.priceCandle.findMany({
-          where: { tokenAddress },
+          where: { tokenAddress: resolvedAddress },
           orderBy: { timestamp: 'desc' },
           take: limit,
         });
@@ -79,7 +88,7 @@ export async function GET(request: NextRequest) {
           // Return candles from whatever timeframe is available
           const availableTF = anyCandles[0].timeframe;
           candles = await db.priceCandle.findMany({
-            where: { tokenAddress, timeframe: availableTF },
+            where: { tokenAddress: resolvedAddress, timeframe: availableTF },
             orderBy: { timestamp: 'desc' },
             take: limit,
           });
