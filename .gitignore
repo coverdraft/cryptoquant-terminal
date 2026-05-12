@@ -80,10 +80,6 @@ monitor-output.json
 # Upload directory (user data)
 /upload/
 
-# OS files
-.DS_Store
-Thumbs.db
-
 # IDE
 .idea/
 .vscode/
