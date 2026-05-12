@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';
 
-const prisma = new PrismaClient();
 
 // In-memory cache for market summary (survives between requests)
 let cachedSummary: any = null;
@@ -147,24 +146,24 @@ async function fetchFromCoinGecko() {
 
 async function fetchFromDatabase() {
   // Get BTC, ETH, SOL from our database
-  const btc = await prisma.token.findFirst({
+  const btc = await db.token.findFirst({
     where: { symbol: { equals: 'BTC', mode: 'insensitive' } },
     select: { priceUsd: true, marketCap: true },
   });
-  const eth = await prisma.token.findFirst({
+  const eth = await db.token.findFirst({
     where: { symbol: { equals: 'ETH', mode: 'insensitive' } },
     select: { priceUsd: true, marketCap: true },
   });
-  const sol = await prisma.token.findFirst({
+  const sol = await db.token.findFirst({
     where: { symbol: { equals: 'SOL', mode: 'insensitive' } },
     select: { priceUsd: true, marketCap: true },
   });
 
-  const totalMarketCap = await prisma.token.aggregate({
+  const totalMarketCap = await db.token.aggregate({
     _sum: { marketCap: true },
   });
 
-  const totalVolume = await prisma.token.aggregate({
+  const totalVolume = await db.token.aggregate({
     _sum: { volume24h: true },
   });
 

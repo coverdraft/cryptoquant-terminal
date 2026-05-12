@@ -85,3 +85,12 @@ prisma/dev.db-wal
 ~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.sql
 ~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.toml
 ~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.lock
+*.pid
+monitor-output.json
+.idea/
+.vscode/
+*.swp
+*.swo
+*.save
+*.bak
+*.tsxo
