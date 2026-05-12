@@ -70,18 +70,3 @@ prisma/dev.db-wal
 
 # Scripts output
 /tmp/
-# No subir archivos sin extensión ni logs
-*.*
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.ts
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.tsx
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.js
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.jsx
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.json
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.css
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.md
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.svg
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.txt
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.sh
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.sql
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.toml
-~/cryptoquant-terminal && rm -f \# Arranca el servidor && git add . && git commit -m limpieza: borrar logs subidos por error && git push.lock
