@@ -12,6 +12,7 @@ export const runtime = 'nodejs';
  */
 
 let initTriggered = false;
+let initCompleted = false;
 
 async function backgroundInit() {
   const { coinGeckoClient } = await import('@/lib/services/coingecko-client');
@@ -22,103 +23,117 @@ async function backgroundInit() {
   let totalEnriched = 0;
 
   // ============================================================
-  // STEP 1: CoinGecko PAGINATED - Top tokens by market cap (5000+)
+  // STEP 1: CoinGecko PAGINATED - Top tokens by market cap
+  // Strategy: Start small (250), increase if no rate limit hit.
+  // CoinGecko free allows ~10-30 req/min. We use 6s delay between pages.
   // ============================================================
   try {
-    console.log('[BrainInit] === STEP 1: Fetching CoinGecko top 5000 tokens (paginated) ===');
-    const topTokens = await coinGeckoClient.getTopTokensPaginated(5000);
-
-    for (const token of topTokens) {
+    console.log('[BrainInit] === STEP 1: Fetching CoinGecko top tokens (adaptive pagination) ===');
+    
+    // Start with a manageable first batch
+    const BATCH_SIZE = 250;
+    const MAX_PAGES = 20;
+    const PAGE_DELAY = 6000; // 6s between pages to respect CoinGecko free rate limits
+    
+    for (let page = 1; page <= MAX_PAGES; page++) {
       try {
-        const address = token.address || token.coinId;
-        if (!address) continue;
+        const key = `coingecko:markets:top:p${page}:${BATCH_SIZE}`;
+        const params = new URLSearchParams({
+          vs_currency: 'usd',
+          order: 'market_cap_desc',
+          per_page: String(BATCH_SIZE),
+          page: String(page),
+          sparkline: 'false',
+          price_change_percentage: '1h,24h,7d',
+        });
 
-        // Determine chain from platforms
-        const chain = detectChain(token);
-
-        await db.token.upsert({
-          where: { address },
-          update: {
-            symbol: token.symbol,
-            name: token.name,
-            priceUsd: token.priceUsd,
-            volume24h: token.volume24h,
-            marketCap: token.marketCap,
-            priceChange1h: token.priceChange1h,
-            priceChange24h: token.priceChange24h,
-          },
-          create: {
-            address,
-            symbol: token.symbol,
-            name: token.name,
-            chain,
-            priceUsd: token.priceUsd,
-            volume24h: token.volume24h,
-            marketCap: token.marketCap,
-            priceChange1h: token.priceChange1h,
-            priceChange24h: token.priceChange24h,
-            liquidity: 0,
-            priceChange5m: 0,
-            priceChange15m: 0,
+        const url = `https://api.coingecko.com/api/v3/coins/markets?${params}`;
+        console.log(`[BrainInit] Fetching page ${page}/${MAX_PAGES}...`);
+        
+        const res = await fetch(url, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'CryptoQuant-Terminal/1.0',
           },
         });
-        totalSeeded++;
-      } catch { /* skip duplicates */ }
+
+        if (res.status === 429) {
+          const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10);
+          console.warn(`[BrainInit] CoinGecko rate limited on page ${page}. Waiting ${retryAfter}s...`);
+          await new Promise(r => setTimeout(r, Math.max(retryAfter, 60) * 1000));
+          page--; // Retry this page
+          continue;
+        }
+
+        if (!res.ok) {
+          console.warn(`[BrainInit] CoinGecko API error ${res.status} on page ${page}. Stopping pagination.`);
+          break;
+        }
+
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length === 0) {
+          console.log(`[BrainInit] No more tokens on page ${page}. Stopping.`);
+          break;
+        }
+
+        // Seed tokens from this page
+        for (const coin of data) {
+          try {
+            const address = coin.id;
+            if (!address) continue;
+
+            const chain = detectChainFromPlatforms(coin.detail_platforms || {});
+
+            await db.token.upsert({
+              where: { address },
+              update: {
+                symbol: (coin.symbol || '').toUpperCase(),
+                name: coin.name || '',
+                priceUsd: coin.current_price ?? 0,
+                volume24h: coin.total_volume ?? 0,
+                marketCap: coin.market_cap ?? 0,
+                priceChange1h: coin.price_change_percentage_1h_in_currency ?? 0,
+                priceChange24h: coin.price_change_percentage_24h ?? 0,
+              },
+              create: {
+                address,
+                symbol: (coin.symbol || '').toUpperCase(),
+                name: coin.name || '',
+                chain,
+                priceUsd: coin.current_price ?? 0,
+                volume24h: coin.total_volume ?? 0,
+                marketCap: coin.market_cap ?? 0,
+                priceChange1h: coin.price_change_percentage_1h_in_currency ?? 0,
+                priceChange24h: coin.price_change_percentage_24h ?? 0,
+                liquidity: 0,
+                priceChange5m: 0,
+                priceChange15m: 0,
+              },
+            });
+            totalSeeded++;
+          } catch { /* skip duplicates */ }
+        }
+
+        console.log(`[BrainInit] Page ${page}: ${data.length} tokens processed. Total seeded: ${totalSeeded}`);
+
+        // Respect rate limits
+        if (page < MAX_PAGES) {
+          await new Promise(r => setTimeout(r, PAGE_DELAY));
+        }
+      } catch (pageErr) {
+        console.warn(`[BrainInit] Page ${page} failed:`, pageErr);
+        // Wait longer and continue with next page
+        await new Promise(r => setTimeout(r, 10_000));
+      }
     }
-    console.log(`[BrainInit] CoinGecko Market Cap: ${totalSeeded}/${topTokens.length} tokens seeded`);
+    
+    console.log(`[BrainInit] CoinGecko Market Cap: ${totalSeeded} tokens seeded total`);
   } catch (err) {
     console.warn('[BrainInit] CoinGecko market cap pagination failed:', err);
   }
 
   // ============================================================
-  // STEP 2: CoinGecko HIGH VOLUME tokens (1000 additional)
-  // ============================================================
-  try {
-    console.log('[BrainInit] === STEP 2: Fetching high-volume tokens (1000) ===');
-    const volumeTokens = await coinGeckoClient.getTopTokensByVolumePaginated(1000);
-    let volumeSeeded = 0;
-
-    for (const token of volumeTokens) {
-      try {
-        const address = token.address || token.coinId;
-        if (!address) continue;
-
-        const chain = detectChain(token);
-
-        await db.token.upsert({
-          where: { address },
-          update: {
-            priceUsd: token.priceUsd,
-            volume24h: token.volume24h,
-            marketCap: token.marketCap,
-            priceChange1h: token.priceChange1h,
-            priceChange24h: token.priceChange24h,
-          },
-          create: {
-            address,
-            symbol: token.symbol,
-            name: token.name,
-            chain,
-            priceUsd: token.priceUsd,
-            volume24h: token.volume24h,
-            marketCap: token.marketCap,
-            priceChange1h: token.priceChange1h,
-            priceChange24h: token.priceChange24h,
-            liquidity: 0,
-            priceChange5m: 0,
-            priceChange15m: 0,
-          },
-        });
-        volumeSeeded++;
-      } catch { /* skip */ }
-    }
-    console.log(`[BrainInit] CoinGecko Volume: ${volumeSeeded}/${volumeTokens.length} tokens seeded`);
-  } catch (err) {
-    console.warn('[BrainInit] CoinGecko volume pagination failed:', err);
-  }
-
-  // ============================================================
-  // STEP 3: CoinGecko TRENDING tokens
+  // STEP 2: CoinGecko TRENDING tokens (lightweight, 1 API call)
   // ============================================================
   try {
     console.log('[BrainInit] === STEP 3: Fetching trending tokens ===');
@@ -681,6 +696,38 @@ async function backgroundInit() {
   }
 
   console.log(`[BrainInit] === INIT COMPLETE: ${totalSeeded} seeded, ${totalEnriched} enriched ===`);
+  initCompleted = true;
+}
+
+/**
+ * Detect chain from CoinGecko detail_platforms object.
+ * Falls back to 'ALL' for multi-chain or unknown tokens.
+ */
+function detectChainFromPlatforms(platforms: Record<string, any>): string {
+  if (!platforms || Object.keys(platforms).length === 0) return 'ALL';
+
+  const platformMap: Record<string, string> = {
+    'ethereum': 'ETH',
+    'solana': 'SOL',
+    'binance-smart-chain': 'BSC',
+    'arbitrum': 'ARB',
+    'optimistic-ethereum': 'OP',
+    'base': 'BASE',
+    'avalanche': 'AVAX',
+    'polygon-pos': 'MATIC',
+    'fantom': 'FTM',
+  };
+
+  const activePlatforms = Object.keys(platforms).filter(p => platforms[p]?.contract_address);
+  if (activePlatforms.includes('solana')) return 'SOL';
+  if (activePlatforms.includes('ethereum')) return 'ETH';
+  if (activePlatforms.includes('binance-smart-chain')) return 'BSC';
+
+  for (const p of activePlatforms) {
+    if (platformMap[p]) return platformMap[p];
+  }
+
+  return 'ALL';
 }
 
 /**
@@ -742,16 +789,24 @@ function generateWalletAddress(chain: string): string {
 }
 
 export async function GET() {
-  if (!initTriggered) {
-    initTriggered = true;
-
-    // Use RealDataLoader for production-quality data loading
-    backgroundInit().catch(err => console.error('[BrainInit] Background init error:', err));
+  // Allow re-triggering if previous init completed or never ran
+  if (initTriggered && !initCompleted) {
+    return NextResponse.json({
+      success: true,
+      action: 'already-running',
+      message: 'Brain init is already in progress. Please wait for it to complete.',
+    });
   }
+
+  initTriggered = true;
+  initCompleted = false;
+
+  // Run in background - does not block the response
+  backgroundInit().catch(err => console.error('[BrainInit] Background init error:', err));
 
   return NextResponse.json({
     success: true,
     action: 'initializing',
-    message: 'Brain init started — RealDataLoader: CoinGecko (10K tokens) + DexScreener enrichment + DexPaprika cross-chain + OHLCV candles + Token DNA + lifecycle phases',
+    message: 'Brain init started — Fetching tokens from CoinGecko (up to 5000) + DexScreener enrichment + Token DNA. This takes 5-10 minutes.',
   });
 }
