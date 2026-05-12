@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
@@ -788,14 +788,20 @@ function generateWalletAddress(chain: string): string {
   return addr;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const force = request.nextUrl.searchParams.get('force') === 'true';
+
   // Allow re-triggering if previous init completed or never ran
-  if (initTriggered && !initCompleted) {
+  if (initTriggered && !initCompleted && !force) {
     return NextResponse.json({
       success: true,
       action: 'already-running',
-      message: 'Brain init is already in progress. Please wait for it to complete.',
+      message: 'Brain init is already in progress. Use ?force=true to restart.',
     });
+  }
+
+  if (force && initTriggered && !initCompleted) {
+    console.log('[BrainInit] Force restart requested — resetting init lock');
   }
 
   initTriggered = true;
@@ -807,6 +813,6 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     action: 'initializing',
-    message: 'Brain init started — Fetching tokens from CoinGecko (up to 5000) + DexScreener enrichment + Token DNA. This takes 5-10 minutes.',
+    message: 'Brain init started — Fetching tokens from CoinGecko (up to 5000) + DexScreener enrichment + Token DNA. This takes 5-10 minutes. Use /api/seed for faster loading.',
   });
 }
