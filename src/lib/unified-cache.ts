@@ -6,6 +6,26 @@
  * rate-limit awareness, and cache statistics.
  *
  * Replaces per-client ad-hoc caching with a single, consistent system.
+ *
+ * ══════════════════════════════════════════════════════════════════════════
+ * RELATIONSHIP TO source-cache.ts (at ./services/source-cache):
+ *
+ *   This module provides the COMPREHENSIVE application-wide singleton cache
+ *   with: request deduplication, rate-limit awareness, cache stats,
+ *   memory tracking, eviction policies, and millisecond-based TTL.
+ *   Used via the `unifiedCache` singleton and `cacheKey` helpers
+ *   (e.g. dexscreener-client, coingecko-client, dexpaprika-client).
+ *
+ *   source-cache.ts provides a SIMPLE per-instance cache with a minute-based
+ *   TTL constructor: `new UnifiedCache(30)`. It wraps this comprehensive
+ *   UnifiedCache internally. Used by services that need their own isolated
+ *   cache instance (e.g. dune-client, footprint-client, sqd-client).
+ *
+ *   When adding a new service:
+ *   - Use `unifiedCache` singleton + `cacheKey` helpers for shared caching
+ *   - Use `new UnifiedCache(minutes)` from source-cache.ts for isolated
+ *     per-instance caching with simple minute-based TTL
+ * ══════════════════════════════════════════════════════════════════════════
  */
 
 // ============================================================
@@ -101,7 +121,7 @@ export const DEFAULT_CACHE_CONFIG: CacheConfig = {
 // UNIFIED CACHE CLASS
 // ============================================================
 
-class UnifiedCache {
+export class UnifiedCache {
   private cache = new Map<string, CacheEntry>();
   private pending = new Map<string, PendingRequest<unknown>>();
   private config: CacheConfig;

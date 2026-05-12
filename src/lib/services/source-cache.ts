@@ -1,15 +1,24 @@
 /**
- * ╔══════════════════════════════════════════════════════════════════════════╗
- * ║  Unified Cache — Single source of truth for ALL in-memory caching      ║
- * ║  TTL-based in-memory cache with per-entry TTL support                  ║
- * ╚══════════════════════════════════════════════════════════════════════════╝
+ * Simple per-instance cache for services (minute-based TTL API).
  *
- * Unified cache used across the entire application — data source clients,
- * extractors, and any service that needs TTL-based in-memory caching.
- * Supports per-entry custom TTL for flexible cache durations.
+ * ══════════════════════════════════════════════════════════════════════════
+ * RELATIONSHIP TO unified-cache.ts (at ../unified-cache):
  *
- * Replaces the former ExtractorCache and SourceCache with a single
- * superior implementation that supports per-entry TTL.
+ *   - THIS module (source-cache.ts) provides a simple, per-instance cache
+ *     with a minute-based TTL constructor: `new UnifiedCache(30)`.
+ *     Used by services that need their own isolated cache instance
+ *     (e.g. dune-client, footprint-client, sqd-client).
+ *
+ *   - unified-cache.ts provides the COMPREHENSIVE application-wide singleton
+ *     cache with: request deduplication, rate-limit awareness, cache stats,
+ *     memory tracking, eviction policies, and millisecond-based TTL.
+ *     Used via the `unifiedCache` singleton and `cacheKey` helpers
+ *     (e.g. dexscreener-client, coingecko-client, dexpaprika-client).
+ *
+ *   Implementation: This module wraps the comprehensive UnifiedCache from
+ *   ../unified-cache with a simpler minute-based API for backward
+ *   compatibility with existing service consumers.
+ * ══════════════════════════════════════════════════════════════════════════
  *
  * Usage:
  *   const cache = new UnifiedCache(30); // 30 min default TTL
@@ -18,48 +27,51 @@
  *   const result = cache.get<Type>('key');
  */
 
+import { UnifiedCache as ComprehensiveCache } from '../unified-cache';
+
 export class UnifiedCache {
-  private cache = new Map<string, { data: unknown; timestamp: number; ttlMs: number }>();
-  private defaultTtlMs: number;
+  private inner: ComprehensiveCache;
 
   constructor(defaultTtlMinutes = 30) {
-    this.defaultTtlMs = defaultTtlMinutes * 60 * 1000;
+    this.inner = new ComprehensiveCache({
+      defaultTtl: defaultTtlMinutes * 60 * 1000,
+      maxEntries: 1000,
+      maxMemoryBytes: 10 * 1024 * 1024,
+      sourceTtls: {},
+      verbose: false,
+    });
   }
 
   get<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) return null;
-    if (Date.now() - entry.timestamp > entry.ttlMs) {
-      this.cache.delete(key);
-      return null;
-    }
-    return entry.data as T;
+    return this.inner.get<T>(key);
   }
 
   /**
-   * Set a cache entry with an optional custom TTL.
+   * Set a cache entry with an optional custom TTL (in minutes).
    * If no custom TTL is provided, uses the default.
    */
   set(key: string, data: unknown, ttlMinutes?: number): void {
-    const ttlMs = ttlMinutes !== undefined ? ttlMinutes * 60 * 1000 : this.defaultTtlMs;
-    this.cache.set(key, { data, timestamp: Date.now(), ttlMs });
+    this.inner.set(
+      key,
+      data,
+      undefined,
+      ttlMinutes !== undefined ? ttlMinutes * 60 * 1000 : undefined,
+    );
   }
 
   /** Invalidate all entries matching a key prefix */
   invalidate(prefix: string): void {
-    for (const key of this.cache.keys()) {
-      if (key.startsWith(prefix)) this.cache.delete(key);
-    }
+    this.inner.invalidate(prefix + '*');
   }
 
   /** Clear all cache entries */
   clear(): void {
-    this.cache.clear();
+    this.inner.clear();
   }
 
   /** Get the number of entries currently in cache */
   size(): number {
-    return this.cache.size;
+    return this.inner.getStats().entries;
   }
 }
 
