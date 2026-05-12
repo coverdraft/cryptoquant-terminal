@@ -25,6 +25,8 @@ import {
   Link2,
   Clock,
   Zap,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import {
   PieChart,
@@ -301,6 +303,44 @@ export function TraderIntelligencePanel() {
   const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<string>('totalPnl');
   const [sortDesc, setSortDesc] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState('');
+
+  // Sync smart money wallets from DexScreener/DexPaprika
+  const handleSyncTraders = useCallback(async () => {
+    if (syncStatus === 'syncing') return;
+    setSyncStatus('syncing');
+    setSyncMessage('Scanning wallets from on-chain data...');
+    try {
+      const res = await fetch('/api/smart-money-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'full' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSyncStatus('done');
+        setSyncMessage('Sync started — wallets being profiled in background');
+        // Also seed traders if none exist
+        const seedRes = await fetch('/api/seed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'traders' }),
+        });
+        const seedData = await seedRes.json();
+        if (seedData.success) {
+          setSyncMessage('Trader sync + seed started — refresh in 30s');
+        }
+      } else {
+        setSyncStatus('error');
+        setSyncMessage(data.error || 'Sync failed');
+      }
+    } catch {
+      setSyncStatus('error');
+      setSyncMessage('Network error — try again');
+    }
+    setTimeout(() => setSyncStatus('idle'), 8000);
+  }, [syncStatus]);
 
   // Fetch traders from API
   const { data: tradersData } = useQuery({
@@ -531,6 +571,27 @@ export function TraderIntelligencePanel() {
         <Badge className="text-[10px] h-5 px-2 font-mono bg-[#1a1f2e] text-[#94a3b8] border-[#2d3748] ml-auto">
           {stats.totalTraders} traders
         </Badge>
+
+        {/* Sync Button */}
+        <Button
+          size="sm"
+          onClick={handleSyncTraders}
+          disabled={syncStatus === 'syncing'}
+          className={`h-6 px-3 text-[10px] font-mono gap-1.5 ${
+            syncStatus === 'syncing' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' :
+            syncStatus === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+            syncStatus === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+            'bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/30 hover:bg-[#d4af37]/30'
+          }`}
+        >
+          {syncStatus === 'syncing' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          {syncStatus === 'syncing' ? 'Syncing...' : syncStatus === 'done' ? 'Synced!' : 'Sync Traders'}
+        </Button>
+
+        {/* Sync Status Message */}
+        {syncMessage && syncStatus !== 'idle' && (
+          <span className="text-[9px] font-mono text-[#64748b] whitespace-nowrap">{syncMessage}</span>
+        )}
       </div>
 
       {/* ========== STATS BAR ========== */}
@@ -578,10 +639,22 @@ export function TraderIntelligencePanel() {
                 {traders.length === 0 && (
                   <tr>
                     <td colSpan={9} className="py-12 text-center">
-                      <div className="flex flex-col items-center gap-2">
+                      <div className="flex flex-col items-center gap-3">
                         <Eye className="h-6 w-6 text-[#2d3748]" />
                         <span className="text-[#64748b] font-mono text-xs">No trader data available</span>
-                        <span className="text-[#475569] font-mono text-[10px]">Sync from DexScreener to populate trader intelligence</span>
+                        <span className="text-[#475569] font-mono text-[10px]">Sync wallets from DexScreener/DexPaprika to populate</span>
+                        <Button
+                          size="sm"
+                          onClick={handleSyncTraders}
+                          disabled={syncStatus === 'syncing'}
+                          className="h-7 px-4 text-[10px] font-mono gap-1.5 bg-[#d4af37]/20 text-[#d4af37] border border-[#d4af37]/30 hover:bg-[#d4af37]/30"
+                        >
+                          {syncStatus === 'syncing' ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                          {syncStatus === 'syncing' ? 'Syncing...' : 'Sync Traders Now'}
+                        </Button>
+                        {syncMessage && (
+                          <span className="text-[9px] font-mono text-[#64748b]">{syncMessage}</span>
+                        )}
                       </div>
                     </td>
                   </tr>
