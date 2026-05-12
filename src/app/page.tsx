@@ -15,27 +15,88 @@ import BrainControl from '@/components/dashboard/brain-control';
 import { OHLCVChart } from '@/components/dashboard/ohlcv-chart';
 import { WebSocketProvider } from '@/components/dashboard/websocket-provider';
 import { SimulationProvider } from '@/components/dashboard/simulation-provider';
-import { useCryptoStore } from '@/store/crypto-store';
+import { DataStatusBar } from '@/components/dashboard/data-status-bar';
+import { useCryptoStore, type ActiveTab } from '@/store/crypto-store';
+import { useEffect, useCallback } from 'react';
+
+// ============================================================
+// KEYBOARD SHORTCUTS: F1-F11 for tabs, Escape to go back
+// ============================================================
+
+const FKEY_TAB_MAP: Record<string, ActiveTab> = {
+  'F1': 'dashboard',
+  'F2': 'signals',
+  'F3': 'dna-scanner',
+  'F4': 'charts',
+  'F5': 'pattern-builder',
+  'F6': 'heatmap',
+  'F7': 'trader-intel',
+  'F8': 'trading-systems',
+  'F9': 'backtesting',
+  'F10': 'big-data',
+  'F11': 'brain',
+};
+
+const TAB_HISTORY: ActiveTab[] = [];
+
+function useKeyboardShortcuts() {
+  const { setActiveTab, activeTab } = useCryptoStore();
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // F-key shortcuts
+    if (FKEY_TAB_MAP[e.key]) {
+      e.preventDefault();
+      TAB_HISTORY.push(activeTab);
+      setActiveTab(FKEY_TAB_MAP[e.key]);
+      return;
+    }
+
+    // Escape: go back to previous tab, or dashboard
+    if (e.key === 'Escape') {
+      const prevTab = TAB_HISTORY.pop() || 'dashboard';
+      setActiveTab(prevTab);
+      return;
+    }
+  }, [setActiveTab, activeTab]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+}
+
+// ============================================================
+// DASHBOARD CONTENT
+// ============================================================
 
 function DashboardContent() {
   const { activeTab, selectedToken } = useCryptoStore();
 
+  // Register keyboard shortcuts
+  useKeyboardShortcuts();
+
   return (
-    <div className="flex flex-col h-screen bg-[#0a0e17] overflow-hidden">
+    <div className="flex flex-col h-screen bg-[#0a0e17] overflow-hidden terminal-scanlines">
       {/* Header Bar */}
       <HeaderBar />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-0 p-2 gap-2">
+      <div className="flex-1 flex flex-col min-h-0 p-1.5 gap-1.5">
         {activeTab === 'dashboard' && (
-          <div className="flex-1 flex gap-2 min-h-0">
+          <div className="flex-1 flex gap-1.5 min-h-0">
             {/* Left: Token Flow (40%) */}
             <div className="w-[40%] shrink-0">
               <TokenFlow />
             </div>
-            {/* Right: Signal Center (60%) */}
-            <div className="flex-1">
-              <SignalCenter />
+            {/* Right: Signal Center + Intelligence Modules */}
+            <div className="flex-1 flex flex-col gap-1.5 min-h-0">
+              <div className="flex-1 min-h-0">
+                <SignalCenter />
+              </div>
+              {/* Intelligence Modules - Compact single row */}
+              <div className="shrink-0">
+                <IntelligenceModules />
+              </div>
             </div>
           </div>
         )}
@@ -47,7 +108,7 @@ function DashboardContent() {
         )}
 
         {activeTab === 'dna-scanner' && (
-          <div className="flex-1 flex gap-2 min-h-0">
+          <div className="flex-1 flex gap-1.5 min-h-0">
             <div className="w-[35%] shrink-0">
               <TokenFlow />
             </div>
@@ -58,7 +119,7 @@ function DashboardContent() {
         )}
 
         {activeTab === 'charts' && (
-          <div className="flex-1 flex gap-2 min-h-0">
+          <div className="flex-1 flex gap-1.5 min-h-0">
             <div className="w-[35%] shrink-0">
               <TokenFlow />
             </div>
@@ -84,7 +145,7 @@ function DashboardContent() {
         )}
 
         {activeTab === 'heatmap' && (
-          <div className="flex-1 flex gap-2 min-h-0">
+          <div className="flex-1 flex gap-1.5 min-h-0">
             <div className="w-[35%] shrink-0">
               <TokenFlow />
             </div>
@@ -125,10 +186,8 @@ function DashboardContent() {
         )}
       </div>
 
-      {/* Intelligence Module Cards */}
-      <div className="p-2 pt-0">
-        <IntelligenceModules />
-      </div>
+      {/* Bottom Status Bar (Bloomberg style) */}
+      <DataStatusBar />
     </div>
   );
 }

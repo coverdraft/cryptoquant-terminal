@@ -85,13 +85,27 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-geist-sans), system-ui, sans-serif;
+    overflow: hidden;
+  }
+  /* Ensure terminal fills entire viewport */
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #0a0e17;
+  }
+  #__next, #root {
+    height: 100%;
   }
 }
 
-/* Custom scrollbar for dark theme */
+/* ============================================================
+   BLOOMBERG TERMINAL CUSTOM SCROLLBAR
+   ============================================================ */
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -99,29 +113,43 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 3px;
+  background: #2d3748;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: #4a5568;
+}
+
+::-webkit-scrollbar-corner {
+  background: #0a0e17;
 }
 
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #374151 #0a0e17;
+  scrollbar-color: #2d3748 #0a0e17;
 }
 
-/* Monospace data styling */
+/* ============================================================
+   MONOSPACE DATA STYLING
+   ============================================================ */
+
 .mono-data {
   font-family: var(--font-geist-mono), 'JetBrains Mono', 'Fira Code', monospace;
   font-variant-numeric: tabular-nums;
 }
 
-/* Glow effects */
+/* ============================================================
+   GLOW EFFECTS - Bloomberg Terminal Style
+   ============================================================ */
+
 .gold-glow {
-  text-shadow: 0 0 10px rgba(212, 175, 55, 0.5), 0 0 20px rgba(212, 175, 55, 0.2);
+  text-shadow: 0 0 8px rgba(212, 175, 55, 0.6), 0 0 16px rgba(212, 175, 55, 0.2);
+}
+
+.gold-glow-box {
+  box-shadow: 0 0 8px rgba(212, 175, 55, 0.3), inset 0 0 8px rgba(212, 175, 55, 0.05);
 }
 
 .cyan-glow {
@@ -132,21 +160,35 @@
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
 }
 
+.green-glow-text {
+  text-shadow: 0 0 6px rgba(16, 185, 129, 0.5), 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
 .red-glow {
   box-shadow: 0 0 8px rgba(239, 68, 68, 0.3);
 }
 
-/* Pulse animation for live indicator */
+.red-glow-text {
+  text-shadow: 0 0 6px rgba(239, 68, 68, 0.5), 0 0 12px rgba(239, 68, 68, 0.15);
+}
+
+/* ============================================================
+   PULSE ANIMATIONS
+   ============================================================ */
+
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
 .live-pulse {
   animation: live-pulse 2s ease-in-out infinite;
 }
 
-/* Signal card entrance animation */
+/* ============================================================
+   SIGNAL CARD ENTRANCE ANIMATION
+   ============================================================ */
+
 @keyframes slide-in {
   from {
     opacity: 0;
@@ -162,7 +204,10 @@
   animation: slide-in 0.3s ease-out;
 }
 
-/* Shimmer effect for loading */
+/* ============================================================
+   SHIMMER EFFECT FOR LOADING
+   ============================================================ */
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -172,4 +217,220 @@
   background: linear-gradient(90deg, transparent 0%, rgba(212, 175, 55, 0.05) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s ease-in-out infinite;
+}
+
+/* ============================================================
+   DATA FADE-IN ANIMATION
+   ============================================================ */
+
+@keyframes data-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.data-fade-in {
+  animation: data-fade-in 0.2s ease-out;
+}
+
+/* ============================================================
+   NUMBER TRANSITION (count up/down feel)
+   ============================================================ */
+
+@keyframes number-flash {
+  0% { color: #e2e8f0; }
+  15% { color: #d4af37; }
+  100% { color: #e2e8f0; }
+}
+
+.number-flash {
+  animation: number-flash 0.6s ease-out;
+}
+
+/* Positive number highlight */
+@keyframes number-flash-green {
+  0% { color: #10b981; }
+  15% { color: #34d399; text-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
+  100% { color: #10b981; text-shadow: none; }
+}
+
+.number-flash-green {
+  animation: number-flash-green 0.6s ease-out;
+}
+
+/* Negative number highlight */
+@keyframes number-flash-red {
+  0% { color: #ef4444; }
+  15% { color: #f87171; text-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+  100% { color: #ef4444; text-shadow: none; }
+}
+
+.number-flash-red {
+  animation: number-flash-red 0.6s ease-out;
+}
+
+/* ============================================================
+   TICKER STRIP / MARQUEE
+   ============================================================ */
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.ticker-scroll {
+  animation: ticker-scroll 60s linear infinite;
+}
+
+.ticker-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* ============================================================
+   SUBTLE SCAN-LINE EFFECT (Bloomberg terminal aesthetic)
+   ============================================================ */
+
+.terminal-scanlines::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+}
+
+/* ============================================================
+   ROW HIGHLIGHT (Bloomberg row hover)
+   ============================================================ */
+
+.terminal-row {
+  transition: background-color 0.1s ease;
+}
+
+.terminal-row:hover {
+  background-color: rgba(212, 175, 55, 0.04) !important;
+}
+
+.terminal-row-selected {
+  background-color: rgba(212, 175, 55, 0.08) !important;
+  border-left: 2px solid #d4af37;
+}
+
+/* ============================================================
+   COMPACT STATUS BAR
+   ============================================================ */
+
+.status-bar {
+  font-family: var(--font-geist-mono), 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  background: #080b12;
+  border-top: 1px solid #1e293b;
+}
+
+/* ============================================================
+   TAB BUTTON (Bloomberg function key style)
+   ============================================================ */
+
+.tab-fn-key {
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.tab-fn-key::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 1px;
+  background: #d4af37;
+  transition: all 0.15s ease;
+  transform: translateX(-50%);
+}
+
+.tab-fn-key:hover::before,
+.tab-fn-key.active::before {
+  width: 80%;
+}
+
+.tab-fn-key.active {
+  background: rgba(212, 175, 55, 0.12);
+}
+
+/* ============================================================
+   CHAIN BADGE COLORS
+   ============================================================ */
+
+.chain-sol { color: #9945FF; }
+.chain-eth { color: #627eea; }
+.chain-base { color: #0052FF; }
+.chain-arb { color: #28A0F0; }
+.chain-bsc { color: #F3BA2F; }
+
+/* ============================================================
+   SPARKLINE SVG PATH ANIMATION
+   ============================================================ */
+
+@keyframes sparkline-draw {
+  from { stroke-dashoffset: 200; }
+  to { stroke-dashoffset: 0; }
+}
+
+.sparkline-path {
+  stroke-dasharray: 200;
+  animation: sparkline-draw 1s ease-out forwards;
+}
+
+/* ============================================================
+   COMPACT CARD HOVER
+   ============================================================ */
+
+.intel-card {
+  transition: all 0.2s ease;
+  border: 1px solid #1e293b;
+}
+
+.intel-card:hover {
+  border-color: #2d3748;
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.08);
+}
+
+/* ============================================================
+   DATA SOURCE INDICATOR DOT
+   ============================================================ */
+
+.data-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.data-dot-live {
+  background: #10b981;
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.5);
+}
+
+.data-dot-db {
+  background: #f59e0b;
+  box-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
+}
+
+.data-dot-offline {
+  background: #64748b;
 }
