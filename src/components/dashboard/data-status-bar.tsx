@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ChevronUp, ChevronDown, Activity } from 'lucide-react';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 interface DataLoaderStatus {
   tokens: number;
@@ -119,13 +120,20 @@ export function DataStatusBar() {
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <span className="flex items-center gap-1">
             Brain:
-            <span className={`font-bold ${
-              brainHealth === 'HEALTHY' ? 'text-emerald-400' :
-              brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
-              'text-red-400'
-            }`}>
-              {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`font-bold ${
+                  brainHealth === 'HEALTHY' ? 'text-emerald-400' :
+                  brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
+                  'text-red-400'
+                }`}>
+                  {brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth === 'NEEDS_VALIDATION' ? 'PENDING' : brainHealth}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="bg-[#1a1f2e] border border-[#2d3748] text-[#94a3b8] text-[10px] font-mono z-[100]">
+                {brainHealth === 'NEEDS_VALIDATION' ? 'Signals pending validation' : `Brain status: ${brainHealth}`}
+              </TooltipContent>
+            </Tooltip>
           </span>
           <span className="text-[#1e293b] hidden sm:inline">│</span>
           <span className="hidden sm:flex items-center gap-1">

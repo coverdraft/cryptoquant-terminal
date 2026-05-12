@@ -8,9 +8,11 @@ export const dynamic = 'force-dynamic';
  * The engine's SystemTemplate doesn't have `id` or `riskLevel` fields,
  * but the frontend's TradingSystemTemplate requires them.
  */
-function enrichTemplate(tpl: Record<string, unknown>, idx: number): Record<string, unknown> {
-  // Generate id from name or index
-  const id = (tpl.id as string) || `tpl-${(tpl.name as string || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${idx}`;
+function enrichTemplate(tpl: Record<string, unknown>, idx: number, category?: string): Record<string, unknown> {
+  // Generate id from name or index — include category slug to avoid cross-category collisions
+  const catSlug = category ? category.toLowerCase().replace(/[^a-z0-9]+/g, '-') : '';
+  const nameSlug = (tpl.name as string || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const id = (tpl.id as string) || `tpl-${catSlug}${catSlug ? '-' : ''}${nameSlug || 'unnamed'}-${idx}`;
 
   // Determine riskLevel from risk management config
   let riskLevel = (tpl.riskLevel as string) || 'MEDIUM';
@@ -62,7 +64,7 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const templates = tradingSystemEngine.getTemplates(category).map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx));
+      const templates = tradingSystemEngine.getTemplates(category).map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx, category));
       const categories = tradingSystemEngine.getCategories();
 
       return NextResponse.json({
@@ -80,7 +82,7 @@ export async function GET(request: NextRequest) {
     // Enrich all templates with IDs and riskLevels
     const grouped: Record<string, unknown[]> = {};
     for (const [cat, catTemplates] of Object.entries(groupedRaw)) {
-      grouped[cat] = catTemplates.map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx));
+      grouped[cat] = catTemplates.map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx, cat));
     }
 
     return NextResponse.json({

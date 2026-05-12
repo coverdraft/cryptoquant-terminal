@@ -904,12 +904,27 @@ export default function TradingSystemsLab() {
     if (!templatesData) return [];
     // API returns { data: { templates: [...] } } when filtered by category
     // or { data: { grouped: {...} } } when all categories
-    if (Array.isArray(templatesData.templates)) return templatesData.templates;
+    if (Array.isArray(templatesData.templates)) {
+      // Ensure every template has a unique id (fallback to index-based)
+      return templatesData.templates.map((tpl, idx) => ({
+        ...tpl,
+        id: tpl.id || `tpl-${idx}`,
+      }));
+    }
     if (templatesData.grouped && typeof templatesData.grouped === 'object') {
-      // Flatten grouped templates
+      // Flatten grouped templates — ensure unique ids across categories
       const allTemplates: TradingSystemTemplate[] = [];
-      for (const catTemplates of Object.values(templatesData.grouped)) {
-        if (Array.isArray(catTemplates)) allTemplates.push(...catTemplates);
+      let globalIdx = 0;
+      for (const [cat, catTemplates] of Object.entries(templatesData.grouped)) {
+        if (Array.isArray(catTemplates)) {
+          for (const tpl of catTemplates) {
+            allTemplates.push({
+              ...tpl,
+              id: tpl.id || `tpl-${cat}-${globalIdx}`,
+            });
+            globalIdx++;
+          }
+        }
       }
       return allTemplates;
     }

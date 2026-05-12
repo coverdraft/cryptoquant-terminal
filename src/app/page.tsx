@@ -9,6 +9,7 @@ import { UserHeatmap } from '@/components/dashboard/user-heatmap';
 import { IntelligenceModules } from '@/components/dashboard/intelligence-modules';
 import { TraderIntelligencePanel } from '@/components/dashboard/trader-intelligence';
 import TradingSystemsLab from '@/components/dashboard/trading-systems-lab';
+import AIStrategyOptimizer from '@/components/dashboard/ai-strategy-optimizer';
 import BacktestingLab from '@/components/dashboard/backtesting-lab';
 import BigDataPredictive from '@/components/dashboard/big-data-predictive';
 import BrainControl from '@/components/dashboard/brain-control';
@@ -21,6 +22,7 @@ import { useCryptoStore, type ActiveTab } from '@/store/crypto-store';
 import { useEffect, useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Brain,
   BarChart3,
@@ -57,12 +59,39 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'signals', label: 'Signals', icon: Radio, shortcut: 'F2', description: 'Live signal feed' },
   { id: 'dna-scanner', label: 'DNA Scanner', icon: Dna, shortcut: 'F3', description: 'Token DNA analysis' },
   { id: 'brain', label: 'Brain', icon: Brain, shortcut: 'F4', description: 'Control center' },
-  { id: 'trading-systems', label: 'Trading Systems', icon: Wallet, shortcut: 'F5', description: 'Trading system lab' },
+  { id: 'trading-systems', label: 'Strategy Lab', icon: Wallet, shortcut: 'F5', description: 'Trading system lab & AI optimizer' },
   { id: 'backtesting', label: 'Backtesting Lab', icon: FlaskConical, shortcut: 'F6', description: 'Strategy backtesting' },
   { id: 'trader-intel', label: 'Smart Money', icon: Eye, shortcut: 'F7', description: 'Trader intelligence' },
   { id: 'deep-analysis', label: 'Deep Analysis', icon: Layers, shortcut: 'F8', description: 'Deep token analysis' },
   { id: 'big-data', label: 'Predictive Engine', icon: Zap, shortcut: 'F9', description: 'AI predictions' },
 ];
+
+// ============================================================
+// STRATEGY LAB CONTENT (Classic + AI Optimizer tabs)
+// ============================================================
+
+function StrategyLabContent() {
+  return (
+    <Tabs defaultValue="classic" className="flex-1 flex flex-col min-h-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#1e293b] bg-[#0d1117] shrink-0">
+        <TabsList className="bg-[#1a1f2e] h-7">
+          <TabsTrigger value="classic" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+            Classic
+          </TabsTrigger>
+          <TabsTrigger value="ai-optimizer" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+            🤖 AI Optimizer
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent value="classic" className="flex-1 min-h-0 mt-0">
+        <TradingSystemsLab />
+      </TabsContent>
+      <TabsContent value="ai-optimizer" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+        <AIStrategyOptimizer />
+      </TabsContent>
+    </Tabs>
+  );
+}
 
 // ============================================================
 // KEYBOARD SHORTCUTS
@@ -199,7 +228,7 @@ function TopBar() {
             brainHealth === 'NEEDS_VALIDATION' ? 'text-yellow-400' :
             'text-[#64748b]'
           }`}>
-            {schedulerRunning ? 'ACTIVE' : brainHealth === 'HEALTHY' ? 'HEALTHY' : 'IDLE'}
+            {schedulerRunning ? 'ACTIVE' : brainHealth === 'HEALTHY' ? 'ACTIVE' : brainHealth === 'NEEDS_VALIDATION' ? 'PENDING' : 'IDLE'}
           </span>
         </div>
       </div>
@@ -465,8 +494,8 @@ function MainContent() {
       </div>
     ),
     'trading-systems': (
-      <div className="flex-1 min-h-0 h-full">
-        <TradingSystemsLab />
+      <div className="flex-1 min-h-0 h-full flex flex-col">
+        <StrategyLabContent />
       </div>
     ),
     backtesting: (

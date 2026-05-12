@@ -6,68 +6,91 @@ import { db } from '@/lib/db';
  * Transform DeepAnalysisResult (flat API format) into DeepAnalysis (nested UI format).
  * The frontend expects the DeepAnalysis shape with verdict, phaseAssessment, etc.
  * The engine's analyze() returns DeepAnalysisResult with different field names.
+ *
+ * Now depth-aware: QUICK produces minimal output, STANDARD moderate, DEEP comprehensive.
  */
 function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
   // Map recommendation to verdict action
   const actionMap: Record<string, string> = {
     STRONG_BUY: 'STRONG_BUY', BUY: 'BUY', HOLD: 'HOLD',
     SELL: 'SELL', STRONG_SELL: 'STRONG_SELL', WAIT: 'WAIT',
+    REDUCE: 'REDUCE', AVOID: 'AVOID',
   };
 
   const verdictAction = actionMap[result.recommendation] || 'HOLD';
 
-  // Build verdict
+  const isDeep = result.depth === 'DEEP';
+  const isQuick = result.depth === 'QUICK';
+
+  // Build verdict (depth-dependent)
   const verdict: DeepAnalysis['verdict'] = {
     action: verdictAction,
     confidence: result.recommendationConfidence,
-    reasoning: result.summary || result.justification?.join('. ') || 'Analysis complete',
+    reasoning: isQuick
+      ? result.summary || 'Quick scan complete'
+      : result.summary || result.justification?.join('. ') || 'Analysis complete',
     summary: result.summary,
-    criticalNote: result.urgencyLevel === 'IMMEDIATE' ? 'Immediate action recommended' : undefined,
+    criticalNote: result.urgencyLevel === 'IMMEDIATE' ? 'Immediate action recommended' :
+      (isDeep && result.stressTestResults?.maxDrawdownEstimate && result.stressTestResults.maxDrawdownEstimate < -30)
+        ? `Stress test: max drawdown estimate ${result.stressTestResults.maxDrawdownEstimate.toFixed(0)}%`
+        : undefined,
   };
 
-  // Build phase assessment from scenarios
+  // Build phase assessment (depth-dependent)
   const phaseAssessment: DeepAnalysis['phaseAssessment'] = {
     phase: result.scenarios?.base?.description?.includes('bull') ? 'GROWTH'
       : result.scenarios?.base?.description?.includes('bear') ? 'DECLINE'
       : 'GROWTH',
     confidence: result.recommendationConfidence,
     timeInPhase: result.suggestedTimeHorizon || 'Unknown',
-    narrative: result.scenarios?.base?.description || 'Market phase assessment',
+    narrative: isQuick
+      ? `Phase: ${result.scenarios?.base?.description || 'Quick assessment'}`
+      : isDeep
+        ? (result.detailedAnalysis?.whaleAccumulationNarrative || result.scenarios?.base?.description || 'Comprehensive phase assessment')
+        : result.scenarios?.base?.description || 'Market phase assessment',
   };
 
-  // Build pattern assessment
+  // Build pattern assessment (depth-dependent)
   const patternAssessment: DeepAnalysis['patternAssessment'] = {
     dominantPattern: result.bullishFactors?.length > result.bearishFactors?.length ? 'Bullish Momentum' : 'Bearish Pressure',
     patternSentiment: verdictAction === 'HOLD' ? 'NEUTRAL' : verdictAction.includes('BUY') ? 'BULLISH' : 'BEARISH',
     multiTfConfirmed: result.justification?.length >= 3,
-    narrative: result.justification?.slice(0, 3).join('. ') || 'Pattern assessment',
+    narrative: isQuick
+      ? (result.justification?.slice(0, 1).join('. ') || 'Quick pattern scan')
+      : isDeep
+        ? (result.justification?.slice(0, 5).join('. ') || 'Detailed pattern assessment')
+        : result.justification?.slice(0, 3).join('. ') || 'Pattern assessment',
   };
 
-  // Build trader assessment
+  // Build trader assessment (depth-dependent)
   const traderAssessment: DeepAnalysis['traderAssessment'] = {
     dominantArchetype: result.riskLevel === 'VERY_LOW' || result.riskLevel === 'LOW' ? 'HOLDER' : 'SPECULATOR',
     behaviorFlow: verdictAction.includes('BUY') ? 'ACCUMULATING' : verdictAction.includes('SELL') ? 'DISTRIBUTING' : 'NEUTRAL',
-    riskFromBots: result.riskLevel === 'EXTREME' ? 'HIGH' : result.riskLevel === 'HIGH' ? 'MEDIUM' : 'LOW',
-    riskFromWhales: result.riskLevel === 'EXTREME' || result.riskLevel === 'HIGH' ? 'ELEVATED' : 'MODERATE',
-    narrative: result.riskAssessment || 'Trader behavior assessment',
+    riskFromBots: isDeep ? (result.detailedAnalysis?.botSwarmImpactAnalysis?.includes('CRITICAL') ? 'CRITICAL' : result.detailedAnalysis?.botSwarmImpactAnalysis?.includes('HIGH') ? 'HIGH' : result.riskLevel === 'HIGH' || result.riskLevel === 'VERY_HIGH' ? 'MEDIUM' : 'LOW') : (result.riskLevel === 'EXTREME' ? 'HIGH' : result.riskLevel === 'HIGH' ? 'MEDIUM' : 'LOW'),
+    riskFromWhales: result.riskLevel === 'EXTREME' || result.riskLevel === 'VERY_HIGH' ? 'ELEVATED' : 'MODERATE',
+    narrative: isDeep
+      ? (result.detailedAnalysis?.botSwarmImpactAnalysis || result.riskAssessment || 'Detailed trader assessment')
+      : isQuick
+        ? 'Quick trader assessment'
+        : result.riskAssessment || 'Trader behavior assessment',
   };
 
-  // Build risk assessment
+  // Build risk assessment (depth-dependent)
   const riskAssessment: DeepAnalysis['riskAssessment'] = {
     overallRisk: result.riskLevel || 'MEDIUM',
-    keyRisks: result.bearishFactors?.slice(0, 5) || [],
-    mitigatingFactors: result.bullishFactors?.slice(0, 5) || [],
-    blackSwanRisk: result.riskLevel === 'EXTREME' ? 'ELEVATED' : 'LOW',
+    keyRisks: result.bearishFactors?.slice(0, isDeep ? 8 : isQuick ? 2 : 5) || [],
+    mitigatingFactors: result.bullishFactors?.slice(0, isDeep ? 8 : isQuick ? 2 : 5) || [],
+    blackSwanRisk: result.riskLevel === 'EXTREME' || result.riskLevel === 'VERY_HIGH' ? 'ELEVATED' : isDeep && result.stressTestResults ? 'MODELED' : 'LOW',
   };
 
   // Build strategy recommendation (depth-dependent)
-  const isDeep = result.depth === 'DEEP';
-  const isQuick = result.depth === 'QUICK';
   const strategyRecommendation: DeepAnalysis['strategyRecommendation'] = {
-    strategy: verdictAction.includes('BUY') ? 'LONG_ENTRY' : verdictAction.includes('SELL') ? 'SHORT_OR_EXIT' : 'WAIT_AND_MONITOR',
-    direction: verdictAction.includes('BUY') ? 'LONG' : verdictAction.includes('SELL') ? 'SHORT' : 'NEUTRAL',
+    strategy: verdictAction.includes('BUY') ? 'LONG_ENTRY' : verdictAction.includes('SELL') || verdictAction === 'REDUCE' ? 'SHORT_OR_EXIT' : 'WAIT_AND_MONITOR',
+    direction: verdictAction.includes('BUY') ? 'LONG' : verdictAction.includes('SELL') || verdictAction === 'REDUCE' ? 'SHORT' : 'NEUTRAL',
     confidenceLevel: result.recommendationConfidence,
-    positionSizeRecommendation: `${result.maxRecommendedPositionPct || 5}% of portfolio`,
+    positionSizeRecommendation: isDeep && result.detailedAnalysis?.riskAdjustedPositionSizing
+      ? `Conservative: ${result.detailedAnalysis.riskAdjustedPositionSizing.conservativePct}% | Moderate: ${result.detailedAnalysis.riskAdjustedPositionSizing.moderatePct}% | Aggressive: ${result.detailedAnalysis.riskAdjustedPositionSizing.aggressivePct}%`
+      : `${result.maxRecommendedPositionPct || 5}% of portfolio`,
     stopLossRecommendation: `${((result.scenarios?.bear?.targetPct || -10)).toFixed(1)}% from entry`,
     takeProfitRecommendation: `${((result.scenarios?.bull?.targetPct || 15)).toFixed(1)}% from entry`,
     entryConditions: isDeep
@@ -76,10 +99,10 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
       ? (verdictAction.includes('BUY') ? ['Confirmation candle required'] : ['N/A'])
       : (verdictAction.includes('BUY') ? ['Wait for confirmation candle', 'Check volume increase'] : ['N/A']),
     exitConditions: isDeep
-      ? (verdictAction.includes('SELL') ? ['Exit on next resistance test', 'Trail stop loss at 5% below recent high', 'Monitor whale wallet movements', 'Watch for regime change signals'] : ['Hold until trend reversal signal', 'Trail stop at 10% below recent high', 'Monitor volume divergence'])
+      ? (verdictAction.includes('SELL') || verdictAction === 'REDUCE' ? ['Exit on next resistance test', 'Trail stop loss at 5% below recent high', 'Monitor whale wallet movements', 'Watch for regime change signals'] : ['Hold until trend reversal signal', 'Trail stop at 10% below recent high', 'Monitor volume divergence'])
       : isQuick
-      ? (verdictAction.includes('SELL') ? ['Exit at resistance'] : ['Hold until reversal'])
-      : (verdictAction.includes('SELL') ? ['Exit on next resistance test', 'Trail stop loss'] : ['Hold until trend reversal']),
+      ? (verdictAction.includes('SELL') || verdictAction === 'REDUCE' ? ['Exit at resistance'] : ['Hold until reversal'])
+      : (verdictAction.includes('SELL') || verdictAction === 'REDUCE' ? ['Exit on next resistance test', 'Trail stop loss'] : ['Hold until trend reversal']),
   };
 
   // Build evidence matrix (depth-dependent weights)
@@ -89,12 +112,12 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
   const pros = (result.bullishFactors || []).map((f, i) => ({
     factor: f,
     weight: Math.min(1, bullWeight + (isDeep ? i * 0.02 : 0)),
-    explanation: isDeep ? f : f,
+    explanation: f,
   }));
   const cons = (result.bearishFactors || []).map((f, i) => ({
     factor: f,
     weight: Math.min(1, bearWeight + (isDeep ? i * 0.02 : 0)),
-    explanation: isDeep ? f : f,
+    explanation: f,
   }));
   const neutrals = (result.neutralFactors || []).map(f => ({
     factor: f,
@@ -103,23 +126,48 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
   }));
 
   // Build reasoning chain (depth-dependent)
-  const maxJustification = isQuick ? 3 : isDeep ? 12 : 6;
+  const maxJustification = isQuick ? 3 : isDeep ? 15 : 6;
   const reasoningChain = [
     `[RISK] Risk Level: ${result.riskLevel || 'MEDIUM'} (Score: ${result.riskScore || 50}/100)`,
     `[DATA] Source: ${result.source || 'RULE_BASED'}`,
     `[VERDICT] Confidence: ${((result.recommendationConfidence || 0.5) * 100).toFixed(0)}%`,
     ...result.justification?.slice(0, maxJustification) || [],
   ];
-  if (isDeep && result.scenarios) {
+  if (!isQuick && result.scenarios?.bull) {
     reasoningChain.push(
       `[SCENARIO] Bull: ${(result.scenarios.bull.probability * 100).toFixed(0)}% prob, +${result.scenarios.bull.targetPct}%`,
       `[SCENARIO] Base: ${(result.scenarios.base.probability * 100).toFixed(0)}% prob, ${result.scenarios.base.targetPct > 0 ? '+' : ''}${result.scenarios.base.targetPct}%`,
       `[SCENARIO] Bear: ${(result.scenarios.bear.probability * 100).toFixed(0)}% prob, ${result.scenarios.bear.targetPct}%`,
     );
-    if (result.keyMonitorPoints?.length) {
-      for (const pt of result.keyMonitorPoints.slice(0, 4)) {
-        reasoningChain.push(`[DATA GAPS] ${pt}`);
+  }
+  if (isDeep && result.extendedScenarios) {
+    for (const sc of result.extendedScenarios) {
+      reasoningChain.push(`[EXT-${sc.name}] ${(sc.probability * 100).toFixed(0)}% prob, ${sc.targetPct > 0 ? '+' : ''}${sc.targetPct}%`);
+    }
+  }
+  if (isDeep && result.stressTestResults) {
+    reasoningChain.push(
+      `[STRESS] Black Swan: ${result.stressTestResults.blackSwanPct.toFixed(0)}%`,
+      `[STRESS] Liquidity Crash: ${result.stressTestResults.liquidityCrashPct.toFixed(0)}%`,
+      `[STRESS] Max Drawdown Est: ${result.stressTestResults.maxDrawdownEstimate.toFixed(0)}%`,
+    );
+  }
+  if (isDeep && result.detailedAnalysis) {
+    reasoningChain.push(`[PHASE] Transition Probability: ${(result.detailedAnalysis.phaseTransitionProbability * 100).toFixed(0)}%`);
+    if (result.detailedAnalysis.invalidationLevels.length > 0) {
+      for (const lvl of result.detailedAnalysis.invalidationLevels.slice(0, 3)) {
+        reasoningChain.push(`[INVALIDATION] ${lvl}`);
       }
+    }
+    if (result.detailedAnalysis.keyAssumptions.length > 0) {
+      for (const a of result.detailedAnalysis.keyAssumptions.slice(0, 3)) {
+        reasoningChain.push(`[ASSUMPTION] ${a}`);
+      }
+    }
+  }
+  if (result.keyMonitorPoints?.length) {
+    for (const pt of result.keyMonitorPoints.slice(0, isDeep ? 6 : isQuick ? 1 : 3)) {
+      reasoningChain.push(`[DATA GAPS] ${pt}`);
     }
   }
   if (result.urgencyLevel) {
@@ -161,6 +209,10 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
     suggestedTimeHorizon: result.suggestedTimeHorizon,
     urgencyLevel: result.urgencyLevel,
     source: result.source,
+    // DEEP-specific fields passed through for the UI
+    extendedScenarios: result.extendedScenarios,
+    stressTestResults: result.stressTestResults,
+    detailedAnalysis: result.detailedAnalysis,
   } as unknown as DeepAnalysis;
 }
 

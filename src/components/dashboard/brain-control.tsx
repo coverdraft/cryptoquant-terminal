@@ -29,6 +29,7 @@ import {
   Loader2,
   Settings2,
   RotateCcw,
+  ShieldCheck,
 } from 'lucide-react';
 
 // ============================================================
@@ -871,6 +872,22 @@ export default function BrainControl() {
                   <RefreshCw className="h-3 w-3 mr-1" />
                 )}
                 Force Sync
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  // Navigate to signals tab to show unvalidated signals
+                  try {
+                    const { useCryptoStore } = require('@/store/crypto-store');
+                    const state = useCryptoStore.getState?.();
+                    if (state?.setActiveTab) state.setActiveTab('signals');
+                  } catch { /* store not available */ }
+                }}
+                className="h-7 px-3 text-[10px] font-mono bg-yellow-600/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-600/30 hover:text-yellow-300"
+                variant="outline"
+              >
+                <ShieldCheck className="h-3 w-3 mr-1" />
+                Validate Signals
               </Button>
             </div>
           </CardContent>
