@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     const isWhale = searchParams.get('isWhale');
     const isSniper = searchParams.get('isSniper');
     const botType = searchParams.get('botType') || undefined;
-    const limit = parseInt(searchParams.get('limit') || '50');
+    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 500);
     const offset = parseInt(searchParams.get('offset') || '0');
     const sortBy = searchParams.get('sortBy') || 'totalPnl';
     const sortOrder = searchParams.get('sortOrder') || 'desc';

@@ -308,7 +308,7 @@ export function TraderIntelligencePanel() {
     queryFn: async () => {
       try {
         const params = new URLSearchParams();
-        params.set('limit', '50');
+        params.set('limit', '200');
         if (chainFilter !== 'ALL') params.set('chain', chainFilter);
         if (traderIntelFilter === 'BOTS') params.set('isBot', 'true');
         if (traderIntelFilter === 'SMART_MONEY') params.set('isSmartMoney', 'true');

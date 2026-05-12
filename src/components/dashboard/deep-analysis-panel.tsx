@@ -54,6 +54,64 @@ import {
 
 export type AnalysisData = DeepAnalysis & Partial<DeepAnalysisResult> & { timestamp?: Date };
 
+/**
+ * Normalize analysis data to ensure all nested objects exist.
+ * The API may return DeepAnalysisResult (flat) which lacks verdict/phaseAssessment/etc.
+ * This ensures the frontend always has safe access to nested properties.
+ */
+function normalizeAnalysis(analysis: AnalysisData): AnalysisData {
+  const a = analysis as any;
+  const safeAnalysis = { ...analysis };
+  (safeAnalysis as any).verdict = analysis.verdict || {
+    action: a.recommendation || 'HOLD',
+    confidence: a.recommendationConfidence || 0.5,
+    reasoning: a.summary || a.justification?.join('. ') || '',
+    summary: a.summary || '',
+  };
+  (safeAnalysis as any).phaseAssessment = analysis.phaseAssessment || {
+    phase: 'GROWTH',
+    confidence: a.recommendationConfidence || 0.5,
+    timeInPhase: a.suggestedTimeHorizon || 'Unknown',
+    narrative: a.scenarios?.base?.description || '',
+  };
+  (safeAnalysis as any).patternAssessment = analysis.patternAssessment || {
+    dominantPattern: null,
+    patternSentiment: 'NEUTRAL',
+    multiTfConfirmed: false,
+    narrative: '',
+  };
+  (safeAnalysis as any).traderAssessment = analysis.traderAssessment || {
+    dominantArchetype: 'UNKNOWN',
+    behaviorFlow: 'NEUTRAL',
+    riskFromBots: 'LOW',
+    riskFromWhales: 'MODERATE',
+    narrative: '',
+  };
+  (safeAnalysis as any).riskAssessment = analysis.riskAssessment && typeof analysis.riskAssessment === 'object'
+    ? analysis.riskAssessment
+    : {
+        overallRisk: a.riskLevel || 'MEDIUM',
+        keyRisks: a.bearishFactors || [],
+        mitigatingFactors: a.bullishFactors || [],
+        blackSwanRisk: 'LOW',
+      };
+  (safeAnalysis as any).strategyRecommendation = analysis.strategyRecommendation || {
+    strategy: 'WAIT_AND_MONITOR',
+    direction: 'NEUTRAL',
+    confidenceLevel: 0.5,
+    positionSizeRecommendation: '5%',
+    stopLossRecommendation: '-10%',
+    takeProfitRecommendation: '15%',
+    entryConditions: [],
+    exitConditions: [],
+  };
+  (safeAnalysis as any).pros = analysis.pros || (a.bullishFactors || []).map((f: string) => ({ factor: f, weight: 0.7, explanation: f }));
+  (safeAnalysis as any).cons = analysis.cons || (a.bearishFactors || []).map((f: string) => ({ factor: f, weight: 0.6, explanation: f }));
+  (safeAnalysis as any).neutrals = analysis.neutrals || (a.neutralFactors || []).map((f: string) => ({ factor: f, weight: 0.5, explanation: f }));
+  (safeAnalysis as any).reasoningChain = analysis.reasoningChain || a.justification || [];
+  return safeAnalysis;
+}
+
 // Add missing properties to DeepAnalysis verdict type
 // ============================================================
 
@@ -356,9 +414,11 @@ function AnalysisInputForm() {
 // ============================================================
 
 function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
-  const vCfg = VERDICT_CONFIG[analysis.verdict.action] || VERDICT_CONFIG.HOLD;
-  const pCfg = PHASE_COLORS[analysis.phaseAssessment.phase] || PHASE_COLORS.LEGACY;
-  const depthCfg = DEPTH_CONFIG[analysis.depth];
+  const verdictAction = analysis.verdict?.action || (analysis as any).recommendation || 'HOLD';
+  const vCfg = VERDICT_CONFIG[verdictAction] || VERDICT_CONFIG.HOLD;
+  const phasePhase = analysis.phaseAssessment?.phase || 'GROWTH';
+  const pCfg = PHASE_COLORS[phasePhase] || PHASE_COLORS.LEGACY;
+  const depthCfg = DEPTH_CONFIG[analysis.depth] || DEPTH_CONFIG.STANDARD;
 
   return (
     <motion.div
@@ -375,14 +435,14 @@ function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
           <div className="flex items-center gap-2">
             <span className="font-mono text-base font-bold text-[#e2e8f0]">{analysis.symbol}</span>
             <Badge className={`${pCfg.bg} ${pCfg.color} ${pCfg.border} border text-[9px] font-mono font-bold`}>
-              {analysis.phaseAssessment.phase}
+              {phasePhase}
             </Badge>
             <Badge variant="outline" className="text-[9px] font-mono border-[#2d3748] text-[#64748b] h-4 px-1.5">
               {depthCfg.label}
             </Badge>
           </div>
           <span className="font-mono text-[11px] text-[#64748b]">
-            {analysis.tokenAddress.slice(0, 6)}...{analysis.tokenAddress.slice(-4)}
+            {analysis.tokenAddress?.slice(0, 6)}...{analysis.tokenAddress?.slice(-4)}
           </span>
         </div>
       </div>
@@ -392,14 +452,14 @@ function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
         <div className="text-right">
           <div className="text-[9px] font-mono text-[#64748b] uppercase tracking-wider">Confidence</div>
           <div className="font-mono text-sm font-bold text-[#e2e8f0]">
-            {formatConfidence(analysis.verdict.confidence)}
+            {formatConfidence(analysis.verdict?.confidence || (analysis as any).recommendationConfidence || 0.5)}
           </div>
         </div>
 
         <Separator orientation="vertical" className="h-8 bg-[#1e293b]" />
 
         {/* Verdict */}
-        <VerdictBadge action={analysis.verdict.action} />
+        <VerdictBadge action={verdictAction} />
       </div>
     </motion.div>
   );
@@ -410,7 +470,8 @@ function AnalysisHeader({ analysis }: { analysis: AnalysisData }) {
 // ============================================================
 
 function PhaseAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
-  const pCfg = PHASE_COLORS[analysis.phaseAssessment.phase] || PHASE_COLORS.LEGACY;
+  const phase = analysis.phaseAssessment?.phase || 'GROWTH';
+  const pCfg = PHASE_COLORS[phase] || PHASE_COLORS.LEGACY;
 
   return (
     <motion.div custom={index} variants={cardVariants} initial="hidden" animate="visible" exit="exit">
@@ -426,15 +487,15 @@ function PhaseAssessmentCard({ analysis, index }: { analysis: AnalysisData; inde
         <CardContent className="px-4 pb-3 space-y-2.5">
           <div className="flex items-center gap-2">
             <Badge className={`${pCfg.bg} ${pCfg.color} ${pCfg.border} border text-[11px] font-mono font-bold`}>
-              {analysis.phaseAssessment.phase}
+              {phase}
             </Badge>
             <span className="text-[10px] font-mono text-[#64748b]">
-              {analysis.phaseAssessment.timeInPhase}
+              {analysis.phaseAssessment?.timeInPhase || 'Unknown'}
             </span>
           </div>
-          <MiniConfidenceBar value={analysis.phaseAssessment.confidence} />
+          <MiniConfidenceBar value={analysis.phaseAssessment?.confidence || 0.5} />
           <p className="text-[10px] text-[#94a3b8] leading-relaxed">
-            {analysis.phaseAssessment.narrative}
+            {analysis.phaseAssessment?.narrative || ''}
           </p>
         </CardContent>
       </Card>
@@ -447,14 +508,15 @@ function PhaseAssessmentCard({ analysis, index }: { analysis: AnalysisData; inde
 // ============================================================
 
 function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
+  const sentiment = analysis.patternAssessment?.patternSentiment || 'NEUTRAL';
   const sentimentColor =
-    analysis.patternAssessment.patternSentiment === 'BULLISH' ? 'text-emerald-400' :
-    analysis.patternAssessment.patternSentiment === 'BEARISH' ? 'text-red-400' :
+    sentiment === 'BULLISH' ? 'text-emerald-400' :
+    sentiment === 'BEARISH' ? 'text-red-400' :
     'text-yellow-400';
 
   const SentimentIcon =
-    analysis.patternAssessment.patternSentiment === 'BULLISH' ? TrendingUp :
-    analysis.patternAssessment.patternSentiment === 'BEARISH' ? TrendingDown :
+    sentiment === 'BULLISH' ? TrendingUp :
+    sentiment === 'BEARISH' ? TrendingDown :
     Minus;
 
   return (
@@ -469,7 +531,7 @@ function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; in
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-3 space-y-2.5">
-          {analysis.patternAssessment.dominantPattern ? (
+          {analysis.patternAssessment?.dominantPattern ? (
             <>
               <div className="flex items-center gap-2">
                 <SentimentIcon className={`h-4 w-4 ${sentimentColor}`} />
@@ -479,13 +541,13 @@ function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; in
               </div>
               <div className="flex items-center gap-2">
                 <Badge className={`text-[9px] font-mono font-bold ${
-                  analysis.patternAssessment.patternSentiment === 'BULLISH'
+                  sentiment === 'BULLISH'
                     ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                    : analysis.patternAssessment.patternSentiment === 'BEARISH'
+                    : sentiment === 'BEARISH'
                     ? 'bg-red-500/15 text-red-400 border-red-500/30'
                     : 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
                 } border`}>
-                  {analysis.patternAssessment.patternSentiment}
+                  {sentiment}
                 </Badge>
                 {analysis.patternAssessment.multiTfConfirmed && (
                   <Badge className="bg-cyan-500/15 text-cyan-400 border-cyan-500/30 border text-[9px] font-mono font-bold gap-1">
@@ -502,7 +564,7 @@ function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; in
             </div>
           )}
           <p className="text-[10px] text-[#94a3b8] leading-relaxed">
-            {analysis.patternAssessment.narrative}
+            {analysis.patternAssessment?.narrative || ''}
           </p>
         </CardContent>
       </Card>
@@ -515,14 +577,15 @@ function PatternAssessmentCard({ analysis, index }: { analysis: AnalysisData; in
 // ============================================================
 
 function TraderAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
+  const behaviorFlow = analysis.traderAssessment?.behaviorFlow || 'NEUTRAL';
   const flowColor =
-    analysis.traderAssessment.behaviorFlow === 'BULLISH' ? 'text-emerald-400' :
-    analysis.traderAssessment.behaviorFlow === 'BEARISH' ? 'text-red-400' :
+    behaviorFlow === 'BULLISH' ? 'text-emerald-400' :
+    behaviorFlow === 'BEARISH' ? 'text-red-400' :
     'text-yellow-400';
 
   const FlowIcon =
-    analysis.traderAssessment.behaviorFlow === 'BULLISH' ? TrendingUp :
-    analysis.traderAssessment.behaviorFlow === 'BEARISH' ? TrendingDown :
+    behaviorFlow === 'BULLISH' ? TrendingUp :
+    behaviorFlow === 'BEARISH' ? TrendingDown :
     Minus;
 
   return (
@@ -542,7 +605,7 @@ function TraderAssessmentCard({ analysis, index }: { analysis: AnalysisData; ind
             <Activity className="h-3.5 w-3.5 text-[#64748b]" />
             <span className="text-[10px] font-mono text-[#64748b]">Archetype:</span>
             <span className="font-mono text-[11px] font-bold text-[#e2e8f0]">
-              {analysis.traderAssessment.dominantArchetype}
+              {analysis.traderAssessment?.dominantArchetype || 'UNKNOWN'}
             </span>
           </div>
 
@@ -551,13 +614,13 @@ function TraderAssessmentCard({ analysis, index }: { analysis: AnalysisData; ind
             <FlowIcon className={`h-3.5 w-3.5 ${flowColor}`} />
             <span className="text-[10px] font-mono text-[#64748b]">Flow:</span>
             <Badge className={`text-[9px] font-mono font-bold ${
-              analysis.traderAssessment.behaviorFlow === 'BULLISH'
+              behaviorFlow === 'BULLISH'
                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                : analysis.traderAssessment.behaviorFlow === 'BEARISH'
+                : behaviorFlow === 'BEARISH'
                 ? 'bg-red-500/15 text-red-400 border-red-500/30'
                 : 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
             } border`}>
-              {analysis.traderAssessment.behaviorFlow}
+              {behaviorFlow}
             </Badge>
           </div>
 
@@ -566,17 +629,17 @@ function TraderAssessmentCard({ analysis, index }: { analysis: AnalysisData; ind
             <div className="flex items-center gap-1.5">
               <Bot className="h-3 w-3 text-[#64748b]" />
               <span className="text-[9px] font-mono text-[#64748b]">Bot</span>
-              <RiskBadge level={analysis.traderAssessment.riskFromBots} />
+              <RiskBadge level={analysis.traderAssessment?.riskFromBots || 'LOW'} />
             </div>
             <div className="flex items-center gap-1.5">
               <Fish className="h-3 w-3 text-[#64748b]" />
               <span className="text-[9px] font-mono text-[#64748b]">Whale</span>
-              <RiskBadge level={analysis.traderAssessment.riskFromWhales} />
+              <RiskBadge level={analysis.traderAssessment?.riskFromWhales || 'MODERATE'} />
             </div>
           </div>
 
           <p className="text-[10px] text-[#94a3b8] leading-relaxed">
-            {analysis.traderAssessment.narrative}
+            {analysis.traderAssessment?.narrative || ''}
           </p>
         </CardContent>
       </Card>
@@ -696,7 +759,11 @@ function EvidenceMatrixCard({ analysis, index }: { analysis: AnalysisData; index
 // ============================================================
 
 function StrategyRecommendationCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
-  const strat = analysis.strategyRecommendation;
+  const strat = analysis.strategyRecommendation || {
+    strategy: 'WAIT_AND_MONITOR', direction: 'NEUTRAL', confidenceLevel: 0.5,
+    positionSizeRecommendation: '5%', stopLossRecommendation: '-10%', takeProfitRecommendation: '15%',
+    entryConditions: [], exitConditions: [],
+  };
   const dirCfg = DIRECTION_CONFIG[strat.direction] || DIRECTION_CONFIG.HOLD;
   const DirIcon = dirCfg.icon;
 
@@ -804,7 +871,12 @@ function StrategyRecommendationCard({ analysis, index }: { analysis: AnalysisDat
 // ============================================================
 
 function RiskAssessmentCard({ analysis, index }: { analysis: AnalysisData; index: number }) {
-  const risk = analysis.riskAssessment;
+  const risk = analysis.riskAssessment || {
+    overallRisk: (analysis as any).riskLevel || 'MEDIUM',
+    keyRisks: (analysis as any).bearishFactors || [],
+    mitigatingFactors: (analysis as any).bullishFactors || [],
+    blackSwanRisk: 'LOW',
+  };
   const rCfg = RISK_CONFIG[risk.overallRisk] || RISK_CONFIG.MEDIUM;
   const RiskIcon = rCfg.icon;
 
@@ -976,7 +1048,8 @@ function ReasoningChainCard({ analysis }: { analysis: AnalysisData }) {
 // ============================================================
 
 function VerdictSummaryCard({ analysis }: { analysis: AnalysisData }) {
-  const vCfg = VERDICT_CONFIG[analysis.verdict.action] || VERDICT_CONFIG.HOLD;
+  const verdictAction = analysis.verdict?.action || (analysis as any).recommendation || 'HOLD';
+  const vCfg = VERDICT_CONFIG[verdictAction] || VERDICT_CONFIG.HOLD;
   const VerdictIcon = vCfg.icon;
 
   return (
@@ -994,10 +1067,10 @@ function VerdictSummaryCard({ analysis }: { analysis: AnalysisData }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1">
                 <span className={`font-mono text-lg font-bold ${vCfg.color}`}>
-                  {analysis.verdict.action.replace('_', ' ')}
+                  {verdictAction.replace('_', ' ')}
                 </span>
                 <span className="mono-data text-[11px] text-[#64748b]">
-                  ({formatConfidence(analysis.verdict.confidence)} confidence)
+                  ({formatConfidence(analysis.verdict?.confidence || (analysis as any).recommendationConfidence || 0.5)} confidence)
                 </span>
               </div>
               <p className="text-[11px] text-[#94a3b8] leading-relaxed">{analysis.verdict?.summary || analysis.verdict?.reasoning || ''}</p>
@@ -1095,7 +1168,8 @@ function AnalysisEmptyState() {
 // ============================================================
 
 export function DeepAnalysisPanel() {
-  const { analysis, status, error } = useDeepAnalysisStore();
+  const { analysis: rawAnalysis, status, error } = useDeepAnalysisStore();
+  const analysis = rawAnalysis ? normalizeAnalysis(rawAnalysis) : null;
 
   return (
     <div className="flex flex-col h-full bg-[#0a0e17] overflow-hidden">

@@ -409,18 +409,33 @@ function HitRateBadge({ rate }: { rate: number }) {
   );
 }
 
-function parsePrediction(predictionStr: string): Record<string, unknown> {
+function parsePrediction(predictionStr: string | null | undefined): Record<string, unknown> {
+  if (!predictionStr) return {};
   try {
-    return JSON.parse(predictionStr);
+    const parsed = JSON.parse(predictionStr);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
   } catch {
     return {};
   }
 }
 
-function parseEvidence(evidenceStr: string): string[] {
+function parseEvidence(evidenceStr: string | null | undefined): string[] {
+  if (!evidenceStr) return [];
   try {
-    return JSON.parse(evidenceStr);
+    const parsed = JSON.parse(evidenceStr);
+    if (Array.isArray(parsed)) return parsed;
+    // If it's an object, convert to readable strings
+    if (typeof parsed === 'object' && parsed !== null) {
+      return Object.entries(parsed).map(([k, v]) => `${k}: ${v}`);
+    }
+    // If it's a single string, wrap in array
+    if (typeof parsed === 'string') return [parsed];
+    return [];
   } catch {
+    // If JSON parse fails, try splitting by newlines or commas
+    if (typeof evidenceStr === 'string' && evidenceStr.length > 0) {
+      return evidenceStr.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    }
     return [];
   }
 }

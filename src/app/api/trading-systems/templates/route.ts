@@ -4,6 +4,37 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
+ * Ensure every template has a unique `id` and valid `riskLevel`.
+ * The engine's SystemTemplate doesn't have `id` or `riskLevel` fields,
+ * but the frontend's TradingSystemTemplate requires them.
+ */
+function enrichTemplate(tpl: Record<string, unknown>, idx: number): Record<string, unknown> {
+  // Generate id from name or index
+  const id = (tpl.id as string) || `tpl-${(tpl.name as string || '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${idx}`;
+
+  // Determine riskLevel from risk management config
+  let riskLevel = (tpl.riskLevel as string) || 'MEDIUM';
+  if (!['LOW', 'MEDIUM', 'HIGH', 'EXTREME'].includes(riskLevel)) {
+    // Derive from risk management maxDrawdown
+    const config = tpl.config as Record<string, unknown> | undefined;
+    const riskMgmt = config?.riskManagement as Record<string, unknown> | undefined;
+    const maxDD = riskMgmt?.maxDrawdown as number | undefined;
+    if (maxDD != null) {
+      riskLevel = maxDD > 30 ? 'EXTREME' : maxDD > 20 ? 'HIGH' : maxDD > 10 ? 'MEDIUM' : 'LOW';
+    } else {
+      // Derive from operationType
+      const opType = tpl.operationType as string;
+      if (opType === 'SCALP') riskLevel = 'HIGH';
+      else if (opType === 'SWING') riskLevel = 'MEDIUM';
+      else if (opType === 'HODL') riskLevel = 'LOW';
+      else riskLevel = 'MEDIUM';
+    }
+  }
+
+  return { ...tpl, id, riskLevel };
+}
+
+/**
  * GET /api/trading-systems/templates
  * Get all system templates from the TradingSystemEngine.
  * Returns templates grouped by category with icons and descriptions.
@@ -31,7 +62,7 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const templates = tradingSystemEngine.getTemplates(category);
+      const templates = tradingSystemEngine.getTemplates(category).map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx));
       const categories = tradingSystemEngine.getCategories();
 
       return NextResponse.json({
@@ -43,8 +74,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Return all templates grouped by category
-    const grouped = tradingSystemEngine.getTemplatesGroupedByCategory();
+    const groupedRaw = tradingSystemEngine.getTemplatesGroupedByCategory();
     const categories = tradingSystemEngine.getCategories();
+
+    // Enrich all templates with IDs and riskLevels
+    const grouped: Record<string, unknown[]> = {};
+    for (const [cat, catTemplates] of Object.entries(groupedRaw)) {
+      grouped[cat] = catTemplates.map((tpl, idx) => enrichTemplate(tpl as unknown as Record<string, unknown>, idx));
+    }
 
     return NextResponse.json({
       data: {

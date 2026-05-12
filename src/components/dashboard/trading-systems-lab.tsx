@@ -1067,8 +1067,8 @@ export default function TradingSystemsLab() {
                 <>
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                     <AnimatePresence>
-                      {templates.map(tpl => (
-                        <TemplateCard key={tpl.id} template={tpl} onSelect={handleCreateFromTemplate} />
+                      {templates.map((tpl, idx) => (
+                        <TemplateCard key={tpl.id || `tpl-${idx}`} template={tpl} onSelect={handleCreateFromTemplate} />
                       ))}
                     </AnimatePresence>
                   </div>
