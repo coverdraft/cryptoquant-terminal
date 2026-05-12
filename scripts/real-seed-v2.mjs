@@ -155,15 +155,16 @@ async function fetchDexScreenerData(symbols) {
 
 async function fetchDexPaprikaTokens(pages = 5) {
   const allTokens = [];
+  const queries = ['solana', 'ethereum', 'bitcoin', 'usdc', 'memecoin', 'defi', 'base', 'arbitrum'];
   
-  for (let page = 1; page <= pages; page++) {
-    console.log(`🌐 DexPaprika: Fetching page ${page}/${pages}...`);
+  for (let i = 0; i < Math.min(pages, queries.length); i++) {
+    console.log(`🌐 DexPaprika: Searching "${queries[i]}"...`);
     
-    const url = `https://api.dexpaprika.com/tokens?page=${page}&limit=100`;
+    const url = `https://api.dexpaprika.com/search?query=${encodeURIComponent(queries[i])}&limit=50`;
     const data = await fetchWithRetry(url, 2, 1500);
     
     if (!data?.tokens) {
-      console.log(`  ⚠️ Page ${page} failed`);
+      console.log(`  ⚠️ Search "${queries[i]}" failed`);
       await sleep(1000);
       continue;
     }
@@ -174,8 +175,8 @@ async function fetchDexPaprikaTokens(pages = 5) {
         name: token.name || '',
         address: token.id || '',
         chain: (token.chain || 'sol').toUpperCase(),
-        priceUsd: token.price_usd || 0,
-        volume24h: token.volume_24h || 0,
+        priceUsd: 0,
+        volume24h: 0,
       });
     }
     

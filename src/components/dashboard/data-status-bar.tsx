@@ -208,7 +208,6 @@ export function DataStatusBar() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1"><span className="data-dot data-dot-db" /> DexPaprika — <span className="text-yellow-400">Cached</span></span>
-                <span className="flex items-center gap-1"><span className="data-dot data-dot-live" /> Birdeye — <span className="text-emerald-400">Online</span></span>
               </div>
             </div>
           </div>
