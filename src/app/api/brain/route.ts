@@ -552,7 +552,7 @@ export async function GET(request: NextRequest) {
 
         let candleCount = 0, lifecycleCount = 0, behaviorCount = 0, feedbackCount = 0;
         let evolutionCount = 0, comparativeCount = 0, signalCount = 0, unvalidatedCount = 0;
-        let tokenCount = 0, traderCount = 0;
+        let tokenCount = 0, traderCount = 0, validatedCount = 0;
 
         try {
           [candleCount, lifecycleCount, behaviorCount, feedbackCount,
@@ -569,6 +569,9 @@ export async function GET(request: NextRequest) {
             db.token.count().catch(() => 0),
             db.trader.count().catch(() => 0),
           ]);
+
+          // Also get validated count for health determination
+          validatedCount = await db.predictiveSignal.count({ where: { wasCorrect: { not: null } } }).catch(() => 0);
         } catch (e) {
           console.error('[Brain API] status DB error:', e);
         }
@@ -586,7 +589,15 @@ export async function GET(request: NextRequest) {
             comparativeAnalyses: comparativeCount,
             totalSignals: signalCount,
             unvalidatedSignals: unvalidatedCount,
-            brainHealth: unvalidatedCount > 0 ? 'NEEDS_VALIDATION' : 'HEALTHY',
+            brainHealth: signalCount === 0 ? 'IDLE' :
+              validatedCount === 0 ? 'LEARNING' :
+              unvalidatedCount > 0 ? 'ACTIVE' :
+              'HEALTHY',
+            brainStatusMessage:
+              signalCount === 0 ? 'No signals yet — start the Brain to begin analysis' :
+              validatedCount === 0 ? 'Brain is learning — signals pending validation' :
+              unvalidatedCount > 0 ? `Brain is active — ${unvalidatedCount} signals pending validation (normal)` :
+              'Brain is healthy — all signals validated',
             enginesWired: [
               'lifecycle', 'behavioral', 'feedback', 'ohlcv',
               'big-data', 'wallet-profiler', 'bot-detection',

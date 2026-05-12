@@ -146,6 +146,7 @@ function TopBar() {
         return json.data as {
           totalSignals: number;
           brainHealth: string;
+          brainStatusMessage?: string;
           tokensTracked: number;
           brainCycles: number;
         } | null;
@@ -225,13 +226,13 @@ function TopBar() {
           <Brain className={`h-3 w-3 ${schedulerRunning ? 'text-emerald-400' : 'text-[#475569]'}`} />
           <span className={`font-mono text-[9px] font-bold ${
             brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'text-emerald-400' :
-            brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'text-cyan-400' :
+            brainHealth === 'LEARNING' ? 'text-cyan-400' :
             brainHealth === 'IDLE' ? 'text-gray-400' :
             'text-[#64748b]'
           }`}>
             {schedulerRunning ? 'ACTIVE' :
               brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'ACTIVE' :
-              brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'LEARNING' :
+              brainHealth === 'LEARNING' ? 'LEARNING' :
               brainHealth === 'IDLE' ? 'IDLE' :
               brainHealth}
           </span>

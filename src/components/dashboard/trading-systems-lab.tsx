@@ -861,8 +861,8 @@ export default function TradingSystemsLab() {
   // Map API system data to TradingSystem interface
   const systems: TradingSystem[] = useMemo(() => {
     if (!systemsData || !Array.isArray(systemsData)) return [];
-    return systemsData.map((s: Record<string, unknown>) => ({
-      id: s.id as string,
+    return systemsData.map((s: Record<string, unknown>, idx: number) => ({
+      id: (s.id as string) || `sys-${idx}`,
       name: s.name as string,
       icon: (s.icon as string) || '🎯',
       category: s.category as string,
@@ -929,7 +929,7 @@ export default function TradingSystemsLab() {
       return allTemplates;
     }
     return [];
-  }, [templatesData]);
+  }, [templatesData, selectedCategory]); // selectedCategory needed for fallback IDs
 
   const selectedSystem = useMemo(() => {
     if (!selectedSystemId) return null;
@@ -1018,13 +1018,13 @@ export default function TradingSystemsLab() {
             <span className="text-[9px] font-mono text-[#475569] uppercase tracking-wider px-2 mb-1 block">My Systems</span>
             <ScrollArea className="max-h-48">
               <div className="space-y-0.5">
-                {systems.map(sys => {
+                {systems.map((sys, idx) => {
                   const statusStyle = STATUS_STYLES[sys.status];
                   const StatusIcon = statusStyle.icon;
                   const isActive = selectedSystemId === sys.id;
                   return (
                     <button
-                      key={sys.id}
+                      key={sys.id || `sys-${idx}`}
                       onClick={() => setSelectedSystemId(isActive ? null : sys.id)}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[11px] font-mono transition-all ${
                         isActive
@@ -1083,7 +1083,7 @@ export default function TradingSystemsLab() {
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                     <AnimatePresence>
                       {templates.map((tpl, idx) => (
-                        <TemplateCard key={`tpl-${selectedCategory}-${idx}`} template={tpl} onSelect={handleCreateFromTemplate} />
+                        <TemplateCard key={tpl.id || `tpl-${selectedCategory}-${idx}`} template={tpl} onSelect={handleCreateFromTemplate} />
                       ))}
                     </AnimatePresence>
                   </div>

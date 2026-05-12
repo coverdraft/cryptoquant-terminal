@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { ThinkingDepth, DeepAnalysisResult, DeepAnalysis } from '@/lib/services/deep-analysis-engine';
+import type { ThinkingDepth, DeepAnalysisResult, DeepAnalysis, DeepAnalysisInput } from '@/lib/services/deep-analysis-engine';
+import type { TokenAnalysis } from '@/lib/services/brain-orchestrator';
 import { db } from '@/lib/db';
 
 /**
@@ -217,8 +218,72 @@ function transformToDeepAnalysis(result: DeepAnalysisResult): DeepAnalysis {
 }
 
 /**
+ * Build a fallback TokenAnalysis when analyzeToken() fails.
+ * Provides reasonable defaults so the engine can still run all depth modes.
+ */
+function buildFallbackBrain(tokenAddress: string, chain: string, symbol: string): TokenAnalysis {
+  return {
+    tokenAddress,
+    symbol,
+    chain,
+    analyzedAt: new Date(),
+    dataFreshness: 'NO_DATA',
+    candlesAvailable: 0,
+    regime: 'SIDEWAYS',
+    regimeConfidence: 0.3,
+    volatilityRegime: 'NORMAL',
+    lifecyclePhase: 'GROWTH',
+    lifecycleConfidence: 0.3,
+    tradingPhase: 'UNKNOWN',
+    isTransitioning: false,
+    netBehaviorFlow: 'NEUTRAL',
+    behaviorConfidence: 0.3,
+    dominantArchetype: 'UNKNOWN',
+    behaviorAnomaly: false,
+    botSwarmLevel: 'LOW',
+    dominantBotType: null,
+    whaleDirection: 'NEUTRAL',
+    whaleConfidence: 0.3,
+    smartMoneyFlow: 'NEUTRAL',
+    operabilityScore: 30,
+    operabilityLevel: 'RISKY',
+    isOperable: false,
+    feeEstimate: { totalCostUsd: 0, totalCostPct: 0, slippagePct: 0 },
+    recommendedPositionUsd: 0,
+    minimumGainPct: 0,
+    meanReversionZone: null,
+    anomalyDetected: false,
+    anomalyScore: 0,
+    patternScanResult: null,
+    patternSignal: 'NEUTRAL',
+    patternScore: 0,
+    dominantPattern: null,
+    patternConfluences: 0,
+    deepAnalysis: null,
+    deepRecommendation: null,
+    deepRiskLevel: null,
+    deepRiskScore: 0,
+    crossCorrelation: null,
+    correlatedOutcome: 'NEUTRAL',
+    correlatedProbability: 0,
+    correlationConflict: false,
+    recommendedSystems: [],
+    action: 'SKIP',
+    actionReason: 'Brain analysis unavailable',
+    warnings: ['Brain orchestrator failed — using fallback data'],
+    evidence: [],
+  } as TokenAnalysis;
+}
+
+/**
  * Run the full deep analysis pipeline for a token.
  * Works with tokens from DB, DexScreener, or synthetic data.
+ *
+ * IMPORTANT: Passes a DeepAnalysisInput (with full brainAnalysis) directly
+ * to the engine instead of an AnalysisInput. This preserves rich data from
+ * analyzeToken() — anomalyDetected, isTransitioning, whaleConfidence,
+ * volatilityRegime, etc. — which are critical for differentiating QUICK,
+ * STANDARD, and DEEP output.
  */
 async function runAnalysis(
   token: { id: string; address: string; symbol: string; chain?: string; priceUsd: number; priceChange24h: number; dna?: any | null },
@@ -227,19 +292,13 @@ async function runAnalysis(
 ) {
   const tokenAddress = token.address;
 
-  // Run the brain orchestrator analysis first
+  // Run the brain orchestrator analysis first — this is the full TokenAnalysis
   const { analyzeToken } = await import('@/lib/services/brain-orchestrator');
-  let brainResult;
+  let brainResult: TokenAnalysis;
   try {
     brainResult = await analyzeToken(tokenAddress, chain);
   } catch {
-    brainResult = {
-      regime: 'UNKNOWN', regimeConfidence: 0.3,
-      lifecyclePhase: 'UNKNOWN', lifecycleConfidence: 0.3,
-      netBehaviorFlow: 'NEUTRAL', botSwarmLevel: 'LOW',
-      whaleDirection: 'NEUTRAL', operabilityScore: 30,
-      candlesAvailable: 0,
-    };
+    brainResult = buildFallbackBrain(tokenAddress, chain, token.symbol);
   }
 
   // Run candlestick pattern scan
@@ -251,57 +310,35 @@ async function runAnalysis(
     patternScan = undefined;
   }
 
-  // Run cross-correlation analysis
-  const { crossCorrelationEngine } = await import('@/lib/services/cross-correlation-engine');
-  let crossCorrelation;
-  try {
-    crossCorrelation = await crossCorrelationEngine.analyzeCrossCorrelation(tokenAddress, chain);
-  } catch {
-    crossCorrelation = undefined;
+  // Run behavioral prediction for STANDARD and DEEP modes
+  let behavioralPrediction;
+  if (depth !== 'QUICK') {
+    try {
+      const { behavioralModelEngine } = await import('@/lib/services/behavioral-model-engine');
+      behavioralPrediction = await behavioralModelEngine.predictBehavior(tokenAddress, chain);
+    } catch {
+      behavioralPrediction = undefined;
+    }
   }
 
-  // Get correlation stats for data reliability
-  let correlationStats;
-  try {
-    correlationStats = await crossCorrelationEngine.getCorrelationStats();
-  } catch {
-    correlationStats = { totalCombinations: 0, totalObservations: 0, reliableCombinations: 0 };
-  }
-
-  // Build deep analysis input
-  const analysisInput = {
+  // Build DeepAnalysisInput directly — preserves full brainAnalysis with
+  // anomalyDetected, isTransitioning, whaleConfidence, volatilityRegime, etc.
+  const deepInput: DeepAnalysisInput = {
     tokenAddress,
-    symbol: token.symbol,
+    symbol: brainResult.symbol || token.symbol,
     chain,
-    currentPrice: token.priceUsd,
-    priceChange24h: token.priceChange24h,
-    regime: brainResult.regime,
-    regimeConfidence: brainResult.regimeConfidence,
-    lifecyclePhase: brainResult.lifecyclePhase,
-    lifecycleConfidence: brainResult.lifecycleConfidence,
-    netBehaviorFlow: brainResult.netBehaviorFlow,
-    botSwarmLevel: brainResult.botSwarmLevel,
-    whaleDirection: brainResult.whaleDirection,
-    operabilityScore: brainResult.operabilityScore,
+    brainAnalysis: brainResult,
     patternScan,
-    crossCorrelation,
-    dataReliability: {
-      sampleSufficiency: correlationStats.reliableCombinations >= 10 ? 'ADEQUATE' as const :
-        correlationStats.totalObservations >= 30 ? 'MINIMAL' as const : 'INSUFFICIENT' as const,
-      totalCorrelationSamples: correlationStats.totalObservations,
-      reliableCombinations: correlationStats.reliableCombinations,
-    },
-    candles1h: brainResult.candlesAvailable,
-    candles5m: 0,
-    tradersAnalyzed: 0,
-    signalsGenerated: 0,
+    behavioralPrediction,
+    depth: depth as ThinkingDepth,
   };
 
   // Dynamically import heavy service
   const { deepAnalysisEngine } = await import('@/lib/services/deep-analysis-engine');
 
-  // Run deep analysis
-  return await deepAnalysisEngine.analyze(analysisInput, depth as ThinkingDepth);
+  // Run deep analysis — engine detects DeepAnalysisInput (no 'currentPrice')
+  // and uses brainAnalysis directly instead of building a synthetic one
+  return await deepAnalysisEngine.analyze(deepInput);
 }
 
 export async function POST(request: NextRequest) {

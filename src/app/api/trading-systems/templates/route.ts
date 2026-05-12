@@ -12,7 +12,8 @@ function enrichTemplate(tpl: Record<string, unknown>, idx: number, category?: st
   // Generate id from name or index — include category slug to avoid cross-category collisions
   const catSlug = category ? category.toLowerCase().replace(/[^a-z0-9]+/g, '-') : '';
   const nameSlug = (tpl.name as string || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const id = (tpl.id as string) || `tpl-${catSlug}${catSlug ? '-' : ''}${nameSlug || 'unnamed'}-${idx}`;
+  const existingId = (tpl.id as string)?.trim();
+  const id = existingId || `tpl-${catSlug}${catSlug ? '-' : ''}${nameSlug || 'unnamed'}-${idx}`;
 
   // Determine riskLevel from risk management config
   let riskLevel = (tpl.riskLevel as string) || 'MEDIUM';

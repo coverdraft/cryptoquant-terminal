@@ -79,11 +79,20 @@ export async function GET() {
         correctSignals: correctCount,
         winRate: validatedCount > 0 ? (correctCount / validatedCount * 100).toFixed(1) + '%' : 'N/A',
         
-        // Health
+        // Health - combines signal state with scheduler operational status
+        // IDLE:       No signals generated yet, Brain needs to be started
+        // LEARNING:   Signals exist but none validated yet (Brain is new/learning)
+        // ACTIVE:     Signals being generated, some pending validation (NORMAL running state)
+        // HEALTHY:    All signals validated, Brain is well-calibrated
         brainHealth: signalCount === 0 ? 'IDLE' :
           validatedCount === 0 ? 'LEARNING' :
           unvalidatedCount > 0 ? 'ACTIVE' :
           'HEALTHY',
+        brainStatusMessage:
+          signalCount === 0 ? 'No signals yet — start the Brain scheduler to begin analysis' :
+          validatedCount === 0 ? 'Brain is learning from new signals — validation pending' :
+          unvalidatedCount > 0 ? `Brain is active — ${unvalidatedCount} signal(s) pending validation (this is normal during operation)` :
+          'Brain is healthy — all signals have been validated',
         enginesWired: [
           'lifecycle', 'behavioral', 'feedback', 'ohlcv',
           'big-data', 'wallet-profiler', 'bot-detection',

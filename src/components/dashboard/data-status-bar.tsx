@@ -26,6 +26,7 @@ interface BrainStatus {
   unvalidatedSignals: number;
   validatedSignals: number;
   brainHealth: string;
+  brainStatusMessage?: string;
   tradingSystems: number;
   activePatterns: number;
   backtestRuns: number;
@@ -124,19 +125,22 @@ export function DataStatusBar() {
               <TooltipTrigger asChild>
                 <span className={`font-bold ${
                   brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'text-emerald-400' :
-                  brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'text-cyan-400' :
+                  brainHealth === 'LEARNING' ? 'text-cyan-400' :
                   brainHealth === 'IDLE' ? 'text-gray-400' :
                   'text-red-400'
                 }`}>
-                  {brainHealth === 'HEALTHY' || brainHealth === 'ACTIVE' ? 'ACTIVE' :
-                    brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'LEARNING' :
+                  {brainHealth === 'HEALTHY' ? 'HEALTHY' :
+                    brainHealth === 'ACTIVE' ? 'ACTIVE' :
+                    brainHealth === 'LEARNING' ? 'LEARNING' :
                     brainHealth === 'IDLE' ? 'IDLE' :
                     brainHealth}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="bg-[#1a1f2e] border border-[#2d3748] text-[#94a3b8] text-[10px] font-mono z-[100]">
-                {brainHealth === 'LEARNING' || brainHealth === 'NEEDS_VALIDATION' ? 'Brain is learning from new signals' :
-                  brainHealth === 'IDLE' ? 'No signals yet — brain is idle' :
+                {brainHealth === 'ACTIVE' ? 'Brain is running and generating signals' :
+                  brainHealth === 'LEARNING' ? 'Brain is learning — signals pending validation' :
+                  brainHealth === 'HEALTHY' ? 'Brain is healthy — all signals validated' :
+                  brainHealth === 'IDLE' ? 'No signals yet — start the Brain scheduler' :
                   `Brain status: ${brainHealth}`}
               </TooltipContent>
             </Tooltip>

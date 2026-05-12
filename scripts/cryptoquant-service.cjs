@@ -81,7 +81,7 @@ async function handleAPI(pathname, url) {
       comparativeAnalyses: c[15], unvalidatedSignals: unv,
       validatedSignals: val, correctSignals: cor,
       winRate: val > 0 ? (cor/val*100).toFixed(1)+'%' : 'N/A',
-      brainHealth: unv > 0 ? 'NEEDS_VALIDATION' : 'HEALTHY',
+      brainHealth: c[4] === 0 ? 'IDLE' : val === 0 ? 'LEARNING' : unv > 0 ? 'ACTIVE' : 'HEALTHY',
     }};
   }
 

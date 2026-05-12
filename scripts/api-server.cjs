@@ -90,7 +90,7 @@ async function handleAPI(path, url) {
       systemEvolutions: counts[14], comparativeAnalyses: counts[15],
       unvalidatedSignals: unvalidated, validatedSignals: validated, correctSignals: correct,
       winRate: validated > 0 ? (correct / validated * 100).toFixed(1) + '%' : 'N/A',
-      brainHealth: unvalidated > 0 ? 'NEEDS_VALIDATION' : 'HEALTHY',
+      brainHealth: counts[4] === 0 ? 'IDLE' : validated === 0 ? 'LEARNING' : unvalidated > 0 ? 'ACTIVE' : 'HEALTHY',
     }};
   }
 
