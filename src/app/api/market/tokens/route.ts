@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { validateOrError, tokenQuerySchema } from '@/lib/validations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,6 +51,17 @@ function determineTokenStatus(token: {
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
+
+  // Validate query params with Zod schema
+  const queryObj = Object.fromEntries(searchParams.entries());
+  const validation = validateOrError(tokenQuerySchema, queryObj);
+  if (!validation.success) {
+    return NextResponse.json(
+      { data: null, error: validation.error, source: 'error' },
+      { status: 400 },
+    );
+  }
+
   const chain = searchParams.get('chain') || 'solana';
   const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 5000);
 

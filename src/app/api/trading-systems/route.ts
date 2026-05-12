@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { validateOrError, tradingSystemCreateSchema } from '@/lib/validations';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -100,39 +101,30 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
+    const validation = validateOrError(tradingSystemCreateSchema, body);
+    if (!validation.success) {
+      return NextResponse.json(
+        { data: null, error: validation.error },
+        { status: 400 },
+      );
+    }
+
+    const validated = validation.data;
+
     const {
-      name, description, category, icon, assetFilter, phaseConfig,
+      icon, assetFilter, phaseConfig,
       entrySignal, executionConfig, exitSignal, bigDataContext,
-      primaryTimeframe, confirmTimeframes, maxPositionPct, maxOpenPositions,
-      stopLossPct, takeProfitPct, trailingStopPct, cashReservePct,
+      confirmTimeframes, maxOpenPositions,
+      trailingStopPct, cashReservePct,
       allocationMethod, allocationConfig, isActive, isPaperTrading,
       parentSystemId, autoOptimize, optimizationMethod, optimizationFreq,
     } = body;
 
-    if (!name || !category) {
-      return NextResponse.json(
-        { data: null, error: 'Name and category are required' },
-        { status: 400 },
-      );
-    }
-
-    const validCategories = [
-      'ALPHA_HUNTER', 'SMART_MONEY', 'TECHNICAL', 'DEFENSIVE',
-      'BOT_AWARE', 'DEEP_ANALYSIS', 'MICRO_STRUCTURE', 'ADAPTIVE',
-    ];
-
-    if (!validCategories.includes(category)) {
-      return NextResponse.json(
-        { data: null, error: `Invalid category. Must be one of: ${validCategories.join(', ')}` },
-        { status: 400 },
-      );
-    }
-
     const tradingSystem = await db.tradingSystem.create({
       data: {
-        name,
-        description: description || null,
-        category,
+        name: validated.name,
+        description: validated.description || null,
+        category: validated.category,
         icon: icon || '🎯',
         assetFilter: typeof assetFilter === 'string' ? assetFilter : JSON.stringify(assetFilter || {}),
         phaseConfig: typeof phaseConfig === 'string' ? phaseConfig : JSON.stringify(phaseConfig || {}),
@@ -140,12 +132,12 @@ export async function POST(request: NextRequest) {
         executionConfig: typeof executionConfig === 'string' ? executionConfig : JSON.stringify(executionConfig || {}),
         exitSignal: typeof exitSignal === 'string' ? exitSignal : JSON.stringify(exitSignal || {}),
         bigDataContext: typeof bigDataContext === 'string' ? bigDataContext : JSON.stringify(bigDataContext || {}),
-        primaryTimeframe: primaryTimeframe || '1h',
+        primaryTimeframe: validated.primaryTimeframe,
         confirmTimeframes: typeof confirmTimeframes === 'string' ? confirmTimeframes : JSON.stringify(confirmTimeframes || []),
-        maxPositionPct: maxPositionPct ?? 5,
+        maxPositionPct: validated.maxPositionPct,
         maxOpenPositions: maxOpenPositions ?? 10,
-        stopLossPct: stopLossPct ?? 15,
-        takeProfitPct: takeProfitPct ?? 40,
+        stopLossPct: validated.stopLossPct,
+        takeProfitPct: validated.takeProfitPct,
         trailingStopPct: trailingStopPct ?? null,
         cashReservePct: cashReservePct ?? 20,
         allocationMethod: allocationMethod || 'KELLY_MODIFIED',

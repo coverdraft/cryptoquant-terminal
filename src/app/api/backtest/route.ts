@@ -81,26 +81,21 @@ export async function POST(request: NextRequest) {
 
     const { systemId, mode, periodStart, periodEnd, initialCapital } = validation.data;
 
-    if (!systemId) {
-      return NextResponse.json({ data: null, error: 'systemId is required' }, { status: 400 });
-    }
-
     const system = await db.tradingSystem.findUnique({ where: { id: systemId } });
     if (!system) {
       return NextResponse.json({ data: null, error: 'Trading system not found' }, { status: 404 });
     }
 
-    const validModes = ['HISTORICAL', 'PAPER', 'FORWARD'];
-    const backtestMode = validModes.includes(mode || '') ? mode! : 'HISTORICAL';
-    const start = periodStart ? new Date(periodStart) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const end = periodEnd ? new Date(periodEnd) : new Date();
+    const backtestMode = mode || 'HISTORICAL';
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
 
     if (start >= end) {
       return NextResponse.json({ data: null, error: 'periodStart must be before periodEnd' }, { status: 400 });
     }
 
-    const capital = initialCapital && initialCapital > 0 ? initialCapital : 10000;
-    const allocMethod = allocationMethod || system.allocationMethod || 'KELLY_MODIFIED';
+    const capital = initialCapital;
+    const allocMethod = system.allocationMethod || 'KELLY_MODIFIED';
 
     const backtest = await db.backtestRun.create({
       data: {
