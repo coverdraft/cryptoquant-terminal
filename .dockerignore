@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+*.db
+*.db-journal
+*.db-wal
+.env
+README.md
+upload/
+download/
+agent-ctx/

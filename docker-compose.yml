@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:./prisma/dev.db
+      - NODE_ENV=production
+      - NEXT_PUBLIC_WS_URL=http://localhost:3003
+    env_file:
+      - .env
+    volumes:
+      - db-data:/app/prisma
+    restart: unless-stopped
+
+  ws-server:
+    build:
+      context: ./mini-services/crypto-ws
+      dockerfile: Dockerfile
+    ports:
+      - "3003:3003"
+      - "3010:3010"
+    environment:
+      - WS_CLIENT_PORT=3003
+      - WS_BRIDGE_PORT=3010
+      - DATA_SOURCE=hybrid
+    env_file:
+      - .env
+    restart: unless-stopped
+
+volumes:
+  db-data:
