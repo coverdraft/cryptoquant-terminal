@@ -6,6 +6,87 @@ import type { DeepAnalysisResult } from '@/lib/services/deep-analysis-engine';
 export type DeepAnalysis = DeepAnalysisType & Partial<DeepAnalysisResult>;
 
 // ============================================================
+// NORMALIZATION — ensures all nested objects exist
+// ============================================================
+
+function normalizeAnalysis(raw: Record<string, unknown>): DeepAnalysis {
+  const a = raw as any;
+
+  // Build verdict from either DeepAnalysis.verdict or DeepAnalysisResult fields
+  const verdict = (raw.verdict && typeof raw.verdict === 'object') ? raw.verdict : {
+    action: a.recommendation || 'HOLD',
+    confidence: a.recommendationConfidence || 0.5,
+    reasoning: a.summary || a.justification?.join('. ') || '',
+    summary: a.summary || '',
+  };
+
+  // Build phaseAssessment
+  const phaseAssessment = (raw.phaseAssessment && typeof raw.phaseAssessment === 'object') ? raw.phaseAssessment : {
+    phase: 'GROWTH',
+    confidence: a.recommendationConfidence || 0.5,
+    timeInPhase: a.suggestedTimeHorizon || 'Unknown',
+    narrative: a.scenarios?.base?.description || '',
+  };
+
+  // Build patternAssessment
+  const patternAssessment = (raw.patternAssessment && typeof raw.patternAssessment === 'object') ? raw.patternAssessment : {
+    dominantPattern: null,
+    patternSentiment: 'NEUTRAL',
+    multiTfConfirmed: false,
+    narrative: '',
+  };
+
+  // Build traderAssessment
+  const traderAssessment = (raw.traderAssessment && typeof raw.traderAssessment === 'object') ? raw.traderAssessment : {
+    dominantArchetype: 'UNKNOWN',
+    behaviorFlow: 'NEUTRAL',
+    riskFromBots: 'LOW',
+    riskFromWhales: 'MODERATE',
+    narrative: '',
+  };
+
+  // Build riskAssessment — could be string (from DeepAnalysisResult) or object (from DeepAnalysis)
+  const riskAssessment = (raw.riskAssessment && typeof raw.riskAssessment === 'object') ? raw.riskAssessment : {
+    overallRisk: a.riskLevel || 'MEDIUM',
+    keyRisks: a.bearishFactors || [],
+    mitigatingFactors: a.bullishFactors || [],
+    blackSwanRisk: 'LOW',
+  };
+
+  // Build strategyRecommendation
+  const strategyRecommendation = (raw.strategyRecommendation && typeof raw.strategyRecommendation === 'object') ? raw.strategyRecommendation : {
+    strategy: 'WAIT_AND_MONITOR',
+    direction: 'NEUTRAL',
+    confidenceLevel: 0.5,
+    positionSizeRecommendation: '5%',
+    stopLossRecommendation: '-10%',
+    takeProfitRecommendation: '15%',
+    entryConditions: [],
+    exitConditions: [],
+  };
+
+  // Build evidence lists
+  const pros = Array.isArray(raw.pros) ? raw.pros : (a.bullishFactors || []).map((f: string) => ({ factor: f, weight: 0.7, explanation: f }));
+  const cons = Array.isArray(raw.cons) ? raw.cons : (a.bearishFactors || []).map((f: string) => ({ factor: f, weight: 0.6, explanation: f }));
+  const neutrals = Array.isArray(raw.neutrals) ? raw.neutrals : (a.neutralFactors || []).map((f: string) => ({ factor: f, weight: 0.5, explanation: f }));
+  const reasoningChain = Array.isArray(raw.reasoningChain) ? raw.reasoningChain : a.justification || [];
+
+  return {
+    ...raw,
+    verdict,
+    phaseAssessment,
+    patternAssessment,
+    traderAssessment,
+    riskAssessment,
+    strategyRecommendation,
+    pros,
+    cons,
+    neutrals,
+    reasoningChain,
+  } as DeepAnalysis;
+}
+
+// ============================================================
 // TYPES
 // ============================================================
 
@@ -32,7 +113,7 @@ export interface DeepAnalysisState {
   setAnalysis: (analysis: DeepAnalysis) => void;
   setStatus: (status: AnalysisStatus) => void;
   setError: (error: string | null) => void;
-  setTokenAddress: (address: string) => void;
+  setTokenAddress: (tokenAddress: string) => void;
   setChain: (chain: string) => void;
   setDepth: (depth: ThinkingDepth) => void;
   toggleReasoningChain: () => void;
@@ -52,7 +133,7 @@ export const useDeepAnalysisStore = create<DeepAnalysisState>((set, get) => ({
 
   // Form inputs
   tokenAddress: '',
-  chain: 'SOL',
+  chain: 'AUTO',
   depth: 'STANDARD',
 
   // UI state
@@ -64,10 +145,10 @@ export const useDeepAnalysisStore = create<DeepAnalysisState>((set, get) => ({
   // Actions
   setAnalysis: (analysis) =>
     set((state) => ({
-      analysis,
+      analysis: normalizeAnalysis(analysis as unknown as Record<string, unknown>),
       status: 'success',
       error: null,
-      analysisHistory: [analysis, ...state.analysisHistory].slice(0, 10),
+      analysisHistory: [normalizeAnalysis(analysis as unknown as Record<string, unknown>), ...state.analysisHistory].slice(0, 10),
     })),
 
   setStatus: (status) => set({ status }),
@@ -97,13 +178,35 @@ export const useDeepAnalysisStore = create<DeepAnalysisState>((set, get) => ({
     set({ status: 'loading', error: null });
 
     try {
+      // If AUTO, try to detect chain from the address or let the API figure it out
+      let resolvedChain = chain;
+      if (chain === 'AUTO') {
+        // Try DexScreener to detect the chain first
+        try {
+          const detectRes = await fetch(`/api/deep-analysis/detect-chain?address=${encodeURIComponent(tokenAddress.trim())}`);
+          if (detectRes.ok) {
+            const detectData = await detectRes.json();
+            if (detectData.chain) {
+              resolvedChain = detectData.chain;
+            }
+          }
+        } catch {
+          // Detection failed, fall back to letting the API try all chains
+        }
+        // If still AUTO, let the API handle it (it will try DexScreener)
+        if (resolvedChain === 'AUTO') {
+          resolvedChain = 'SOL'; // Default fallback
+        }
+      }
+
       const res = await fetch('/api/deep-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tokenAddress: tokenAddress.trim(),
-          chain,
+          chain: resolvedChain,
           depth,
+          autoDetect: chain === 'AUTO',
         }),
       });
 
@@ -114,6 +217,10 @@ export const useDeepAnalysisStore = create<DeepAnalysisState>((set, get) => ({
 
       const data = await res.json();
       if (data.success && data.analysis) {
+        // If auto-detected, update the chain in the store
+        if (chain === 'AUTO' && data.analysis.chain) {
+          set({ chain: data.analysis.chain });
+        }
         get().setAnalysis(data.analysis);
       } else {
         throw new Error(data.error || 'Invalid response from analysis engine');

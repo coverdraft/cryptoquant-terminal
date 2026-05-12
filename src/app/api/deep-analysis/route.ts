@@ -211,21 +211,31 @@ async function runAnalysis(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { tokenAddress, chain = 'SOL', depth = 'STANDARD' } = body;
+    const { tokenAddress, chain = 'SOL', depth = 'STANDARD', autoDetect = false } = body;
 
     if (!tokenAddress) {
       return NextResponse.json({ error: 'tokenAddress required' }, { status: 400 });
     }
 
-    // Get token data from DB
-    const token = await db.token.findUnique({
-      where: { address: tokenAddress },
-      include: { dna: true },
-    });
+    // Get token data from DB (try all chains if autoDetect)
+    let token: Awaited<ReturnType<typeof db.token.findUnique>> = null;
+    if (autoDetect) {
+      // Try finding the token in DB by address across all chains
+      token = await db.token.findFirst({
+        where: { address: tokenAddress },
+        include: { dna: true },
+      });
+    } else {
+      token = await db.token.findUnique({
+        where: { address: tokenAddress },
+        include: { dna: true },
+      });
+    }
 
     if (token) {
-      // Token found in DB — run full analysis
-      const result = await runAnalysis(token, chain, depth);
+      // Token found in DB — run full analysis (use token's actual chain)
+      const tokenChain = token.chain || chain;
+      const result = await runAnalysis(token, tokenChain, depth);
       return NextResponse.json({ success: true, analysis: transformToDeepAnalysis(result) });
     }
 

@@ -155,6 +155,7 @@ const DEPTH_CONFIG: Record<ThinkingDepth, { label: string; desc: string; color: 
 };
 
 const CHAINS = [
+  { value: 'AUTO', label: '🔍 Auto-detect' },
   { value: 'SOL', label: 'Solana' },
   { value: 'ETH', label: 'Ethereum' },
   { value: 'BASE', label: 'Base' },
@@ -343,7 +344,7 @@ function AnalysisInputForm() {
           <div className="flex-1 relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[#64748b]" />
             <Input
-              placeholder="Enter token address..."
+              placeholder="Token or wallet address (auto-detects chain)..."
               value={tokenAddress}
               onChange={(e) => setTokenAddress(e.target.value)}
               onKeyDown={(e) => {
