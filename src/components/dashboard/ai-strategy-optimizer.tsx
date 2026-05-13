@@ -954,6 +954,40 @@ export default function AIStrategyOptimizer() {
     }
   }, [refetchScan, generateMutation, runLoopMutation, refetchRank]);
 
+  // Evolve top strategies mutation
+  const evolveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/strategy-optimizer/evolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'evolve',
+          maxIterations: 3,
+          improvementThreshold: 2,
+          mutationRate: 0.3,
+          topN: 3,
+          capital,
+        }),
+      });
+      if (!res.ok) throw new Error('Evolution failed');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      toast.success(`🧬 Evolution complete: ${result.improved} improved, ${result.degraded} degraded out of ${result.totalMutations} mutations`);
+      queryClient.invalidateQueries({ queryKey: ['backtests'] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-optimizer-rank'] });
+      refetchRank();
+    },
+    onError: () => {
+      toast.error('Evolution failed. Run the pipeline first to have strategies to evolve.');
+    },
+  });
+
+  const handleEvolve = useCallback(() => {
+    evolveMutation.mutate();
+  }, [evolveMutation]);
+
   const toggleTimeframe = (tf: string) => {
     setSelectedTimeframes(prev =>
       prev.includes(tf) ? prev.filter(t => t !== tf) : [...prev, tf]
@@ -1123,6 +1157,18 @@ export default function AIStrategyOptimizer() {
                 <Rocket className="h-3 w-3 mr-1" /> Run Full Pipeline
               </>
             )}
+          </Button>
+          <Button
+            onClick={handleEvolve}
+            disabled={evolveMutation.isPending || rankedResults.length === 0}
+            className="h-7 px-3 text-[10px] font-mono bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-500/30"
+          >
+            {evolveMutation.isPending ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <Layers className="h-3 w-3 mr-1" />
+            )}
+            Evolve Top Strategies
           </Button>
           <Button
             variant="ghost"
@@ -1661,23 +1707,24 @@ export default function AIStrategyOptimizer() {
                 </span>
               </div>
             ) : (
-              <div className="max-h-72 overflow-y-auto">
+              <div className="overflow-y-auto" style={{ maxHeight: 'min(500px, 60vh)' }}>
                 <table className="w-full text-[9px] font-mono">
-                  <thead>
+                  <thead className="sticky top-0 bg-[#0d1117] z-10">
                     <tr className="text-[#475569] uppercase border-b border-[#1e293b]">
-                      <th className="py-1 px-1.5 text-left">#</th>
-                      <th className="py-1 px-1.5 text-left">Strategy</th>
-                      <th className="py-1 px-1.5 text-right">Score</th>
-                      <th className="py-1 px-1.5 text-right">Sharpe</th>
-                      <th className="py-1 px-1.5 text-right">Win%</th>
-                      <th className="py-1 px-1.5 text-right">PnL%</th>
-                      <th className="py-1 px-1.5 text-right">DD%</th>
-                      <th className="py-1 px-1.5 text-right">PF</th>
-                      <th className="py-1 px-1.5 text-center">★</th>
+                      <th className="py-1.5 px-1.5 text-left">#</th>
+                      <th className="py-1.5 px-1.5 text-left">Strategy</th>
+                      <th className="py-1.5 px-1.5 text-right">Score</th>
+                      <th className="py-1.5 px-1.5 text-right">Sharpe</th>
+                      <th className="py-1.5 px-1.5 text-right">Win%</th>
+                      <th className="py-1.5 px-1.5 text-right">PnL%</th>
+                      <th className="py-1.5 px-1.5 text-right">DD%</th>
+                      <th className="py-1.5 px-1.5 text-right">PF</th>
+                      <th className="py-1.5 px-1.5 text-right">Trades</th>
+                      <th className="py-1.5 px-1.5 text-center">★</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredRankedResults.slice(0, 20).map((result, idx) => (
+                    {filteredRankedResults.slice(0, 50).map((result, idx) => (
                       <tr key={result.id || `rank-${idx}`} className="border-b border-[#1e293b]/50 hover:bg-[#111827] transition-colors">
                         <td className="py-1.5 px-1.5 text-[#d4af37] font-bold">{idx + 1}</td>
                         <td className="py-1.5 px-1.5 text-[#e2e8f0] max-w-[200px] truncate">{result.strategyName}</td>
@@ -1689,6 +1736,7 @@ export default function AIStrategyOptimizer() {
                         </td>
                         <td className="py-1.5 px-1.5 text-right text-red-400">{result.maxDrawdownPct.toFixed(1)}%</td>
                         <td className="py-1.5 px-1.5 text-right text-[#94a3b8]">{result.profitFactor.toFixed(2)}</td>
+                        <td className="py-1.5 px-1.5 text-right text-[#94a3b8]">{result.totalTrades}</td>
                         <td className="py-1.5 px-1.5 text-center">
                           <button
                             onClick={() => saveBestMutation.mutate(result)}
@@ -1754,7 +1802,7 @@ export default function AIStrategyOptimizer() {
                 <span className="font-mono text-sm">No saved strategies yet. Bookmark your best results above.</span>
               </div>
             ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto">
+              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 'min(400px, 50vh)' }}>
                 {bestStrategies.map((strat, idx) => (
                   <motion.div
                     key={strat.id || `best-${idx}`}

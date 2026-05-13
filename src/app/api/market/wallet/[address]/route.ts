@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
  * GET /api/market/wallet/[address]
  *
  * Fetches wallet transaction history using the DataIngestionPipeline,
- * which combines Solana RPC signatures + Birdeye wallet transactions
+ * which combines Solana RPC signatures
  * (for SOL) or Ethereum RPC data (for ETH).
  *
  * Route params:
@@ -20,7 +20,6 @@ export const dynamic = 'force-dynamic';
  *   - Solana RPC (public):   ~100 req/10s per IP – getSignaturesForAddress + individual
  *                            getTransaction calls can exhaust this quickly.
  *                            Pipeline caps at 20 tx lookups per request.
- *   - Birdeye (free):        ~100 req/min – requires X-API-KEY for higher throughput.
  *   - Ethereum RPC (public): Varies by provider, typically 10-50 req/s.
  *
  * Response envelope:

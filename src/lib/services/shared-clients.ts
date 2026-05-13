@@ -5,7 +5,7 @@
  * so that API route handlers don't need to construct their own
  * cache/client instances on every request.
  *
- * Data sources (NO Birdeye - use CoinGecko instead):
+ * Data sources (use CoinGecko for price/OHLCV data):
  *   - CoinGecko (PRIMARY - market data, prices, volumes, OHLCV) [FREE, no API key]
  *   - DexScreener (multi-chain token data, DEX pairs/pools) [FREE]
  *   - DexPaprika (35 chains, pool swaps, buy/sell ratios) [FREE]
@@ -38,7 +38,7 @@ export const moralisClient = new MoralisClient(
   sharedCache,
 );
 
-/** Shared CoinGecko client for price/OHLCV data (replaces Birdeye) */
+/** Shared CoinGecko client for price/OHLCV data */
 export const coinGeckoClient = new CoinGeckoClient();
 
 /** Shared DexPaprika client for multi-chain DEX data (FREE, no API key) */

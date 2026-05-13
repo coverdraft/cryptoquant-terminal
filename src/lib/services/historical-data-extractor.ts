@@ -3,7 +3,7 @@
  * 
  * MASSIVE backfill engine that accumulates historical data from ALL available sources:
  * - DexScreener: token metadata, transaction history, price changes
- * - Birdeye: OHLCV candles (multi-timeframe), token lists, wallet transactions
+ * - CoinGecko: OHLCV candles, token lists, trending data
  * - Solana RPC: full transaction signatures + parsed transactions for any wallet
  * - Ethereum RPC: eth_getLogs for swap events, transaction history
  * 
@@ -18,7 +18,7 @@
 import { db } from '../db';
 import { toNum } from '../utils';
 import {
-  DexScreenerClient, BirdeyeClient, SolanaRpcClient, EthereumRpcClient,
+  DexScreenerClient, SolanaRpcClient, EthereumRpcClient,
   DataIngestionPipeline, DEFAULT_CONFIG,
   type DexScreenerToken, type ParsedTransaction,
 } from './data-ingestion';
@@ -98,7 +98,6 @@ export interface BackfillProgress {
 
 export class HistoricalDataExtractor {
   private dexscreener: DexScreenerClient;
-  private birdeye: BirdeyeClient;
   private solana: SolanaRpcClient;
   private ethereum: EthereumRpcClient;
   private ohlcv: OHLCVPipeline;
@@ -109,7 +108,6 @@ export class HistoricalDataExtractor {
   constructor(config: Partial<MassiveBackfillConfig> = {}) {
     this.config = { ...DEFAULT_BACKFILL_CONFIG, ...config };
     this.dexscreener = new DexScreenerClient();
-    this.birdeye = new BirdeyeClient(); // DEPRECATED - Birdeye no longer supported, stub only
     this.solana = new SolanaRpcClient(DEFAULT_CONFIG.solanaRpcUrl);
     this.ethereum = new EthereumRpcClient(DEFAULT_CONFIG.ethereumRpcUrl);
     this.ohlcv = new OHLCVPipeline();
@@ -137,7 +135,7 @@ export class HistoricalDataExtractor {
 
   /**
    * Discover tokens from ALL sources and persist them to DB.
-   * Sources: DexScreener trending/boosted/search, Birdeye token lists/new listings.
+   * Sources: DexScreener trending/boosted/search, CoinGecko token lists.
    * Returns addresses of discovered tokens for subsequent backfill.
    */
   async discoverTokens(): Promise<string[]> {
@@ -186,42 +184,7 @@ export class HistoricalDataExtractor {
 
     await this.delay(this.config.interRequestDelay);
 
-    // Source 3: Birdeye token lists by volume (top 50 per chain)
-    for (const chain of this.config.chains) {
-      try {
-        const birdeyeTokens = await this.birdeye.getTokenList('v24hUSD', 'desc', 50, chain);
-        for (const t of birdeyeTokens) {
-          if (t.address && !seen.has(t.address)) {
-            seen.add(t.address);
-            allAddresses.push(t.address);
-            await this.persistBirdeyeToken(t, chain);
-            this.progress.tokensDiscovered++;
-          }
-        }
-        console.log(`[historical-extractor] Birdeye ${chain}: ${birdeyeTokens.length} tokens`);
-      } catch (err) {
-        this.progress.errors.push(`Birdeye ${chain}: ${String(err)}`);
-      }
-      await this.delay(this.config.interRequestDelay);
-    }
-
-    // Source 4: Birdeye new listings
-    for (const chain of this.config.chains) {
-      try {
-        const newListings = await this.birdeye.getNewListings(20, chain);
-        for (const t of newListings) {
-          if (t.address && !seen.has(t.address)) {
-            seen.add(t.address);
-            allAddresses.push(t.address);
-            await this.persistBirdeyeToken(t, chain);
-            this.progress.tokensDiscovered++;
-          }
-        }
-      } catch (err) {
-        this.progress.errors.push(`Birdeye new listings ${chain}: ${String(err)}`);
-      }
-      await this.delay(this.config.interRequestDelay);
-    }
+    // Source 3 & 4: CoinGecko and DexScreener cover these needs
 
     // Source 5: Search for popular query terms on DexScreener
     const popularQueries = ['SOL', 'BONK', 'WIF', 'JUP', 'MEME', 'PEPE', 'FLOKI', 'DOGE', 'ETH', 'USDC'];
@@ -257,10 +220,9 @@ export class HistoricalDataExtractor {
 
   /**
    * Massively backfill OHLCV candles for all discovered tokens.
-   * Strategy: First try Birdeye OHLCV (if API key available). 
-   * If Birdeye fails (no API key), fall back to building candles from 
-   * DexScreener price snapshots — we collect current prices and build
-   * approximate 1h/1d candles from the priceChange data.
+   * Strategy: Use CoinGecko OHLCV pipeline as the primary source.
+   * If CoinGecko fails, fall back to building candles from
+   * DexScreener price snapshots.
    */
   async backfillOHLCV(tokenAddresses: string[]): Promise<number> {
     this.progress.phase = 'OHLCV_BACKFILL';
@@ -269,7 +231,7 @@ export class HistoricalDataExtractor {
 
     console.log(`[historical-extractor] Phase 2: OHLCV Backfill for ${tokenAddresses.length} tokens...`);
 
-    // Birdeye is no longer available - always use CoinGecko/OHLCV pipeline
+    // Always use CoinGecko/OHLCV pipeline for candle data
     console.log(`[historical-extractor] Using CoinGecko + OHLCV Pipeline for candle data`);
 
     // Process in batches to control concurrency
@@ -286,7 +248,7 @@ export class HistoricalDataExtractor {
           const token = await db.token.findUnique({ where: { address: addr }, select: { chain: true, priceUsd: true, volume24h: true } });
           const chain = this.normalizeChain(token?.chain || 'SOL');
 
-          // Use CoinGecko/OHLCV pipeline for backfill (Birdeye no longer available)
+          // Use CoinGecko/OHLCV pipeline for backfill
           const result = await this.ohlcv.backfillToken(addr, chain, this.config.timeframes);
           totalCandles += result.totalStored;
 
@@ -501,7 +463,7 @@ export class HistoricalDataExtractor {
 
   /**
    * For the top discovered traders/wallets, pull their full transaction history
-   * from Solana RPC (getSignaturesForAddress) and Birdeye.
+   * from Solana RPC (getSignaturesForAddress) and Etherscan.
    * This gives us the complete picture of what each wallet has been doing.
    */
   async extractWalletHistory(): Promise<number> {
@@ -569,16 +531,7 @@ export class HistoricalDataExtractor {
             });
           }
 
-          // Also get Birdeye wallet transactions (richer data)
-          try {
-            const birdeyeTx = await this.birdeye.getWalletTransactions(trader.address, 50, 'solana');
-            for (const tx of birdeyeTx) {
-              await this.persistParsedTransaction(tx, trader.address);
-              totalTx++;
-            }
-          } catch (err) {
-            // Birdeye wallet endpoint may not work without API key
-          }
+          // Use Etherscan for ETH wallets
         }
 
         if (chain === 'ETH') {
@@ -610,7 +563,7 @@ export class HistoricalDataExtractor {
 
   /**
    * For tokens that already have some OHLCV data, extend the history further back.
-   * Birdeye supports fetching OHLCV with time_from/time_to parameters, so we can
+   * CoinGecko supports fetching OHLCV with different day parameters, so we can
    * go back incrementally: each call gets us 200 candles, we keep going back.
    */
   async deepOHLCVBackfill(tokenAddresses: string[]): Promise<number> {
@@ -656,38 +609,13 @@ export class HistoricalDataExtractor {
           const maxChunks = 20; // Safety limit
 
           while (cursorStart > targetStart && chunkAttempts < maxChunks) {
-            const birdeyeTf = this.toBirdeyeTf(tf);
-            const items = await this.birdeye.getOHLCV(addr, birdeyeTf as '1m' | '3m' | '5m' | '15m' | '30m' | '1H' | '4H' | '1D', 200, chain);
+            // CoinGecko OHLCV pipeline
+            const result = await this.ohlcv.backfillToken(addr, chain, [tf]);
+            const items = result.totalStored;
 
-            if (items.length === 0) break;
+            if (items === 0) break;
 
-            // Filter to our time range and store
-            for (const item of items) {
-              if (item.unixTime < cursorStart || item.unixTime > cursorEnd) continue;
-              
-              try {
-                await db.priceCandle.upsert({
-                  where: {
-                    tokenAddress_chain_timeframe_timestamp: {
-                      tokenAddress: addr, chain, timeframe: tf,
-                      timestamp: new Date(item.unixTime * 1000),
-                    },
-                  },
-                  create: {
-                    tokenAddress: addr, chain, timeframe: tf,
-                    timestamp: new Date(item.unixTime * 1000),
-                    open: item.open, high: item.high, low: item.low,
-                    close: item.close, volume: item.volume, trades: 0, source: 'birdeye',
-                  },
-                  update: {
-                    close: item.close, volume: item.volume,
-                  },
-                });
-                totalCandles++;
-              } catch {
-                // Skip duplicates
-              }
-            }
+            totalCandles += items;
 
             // Move cursor back
             cursorEnd = cursorStart;
@@ -821,39 +749,6 @@ export class HistoricalDataExtractor {
       this.progress.tokensStored++;
     } catch (err) {
       this.progress.errors.push(`Persist token ${addr}: ${String(err)}`);
-    }
-  }
-
-  /** Persist a Birdeye token to our DB */
-  private async persistBirdeyeToken(t: { address: string; symbol: string; name: string; price: number; priceChange24h: number; volume24h: number; marketCap: number; liquidity: number }, chain: string): Promise<void> {
-    if (!t.address) return;
-
-    try {
-      const normalizedChain = this.normalizeChain(chain);
-      await db.token.upsert({
-        where: { address: t.address },
-        create: {
-          address: t.address,
-          symbol: t.symbol || 'UNKNOWN',
-          name: t.name || 'Unknown',
-          chain: normalizedChain,
-          priceUsd: t.price || 0,
-          volume24h: t.volume24h || 0,
-          liquidity: t.liquidity || 0,
-          marketCap: t.marketCap || 0,
-          priceChange24h: t.priceChange24h || 0,
-        },
-        update: {
-          priceUsd: t.price || 0,
-          volume24h: t.volume24h || 0,
-          liquidity: t.liquidity || 0,
-          marketCap: t.marketCap || 0,
-          priceChange24h: t.priceChange24h || 0,
-        },
-      });
-      this.progress.tokensStored++;
-    } catch (err) {
-      this.progress.errors.push(`Persist Birdeye token ${t.address}: ${String(err)}`);
     }
   }
 
@@ -1011,13 +906,6 @@ export class HistoricalDataExtractor {
       '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400,
     };
     return map[tf] || 3600;
-  }
-
-  private toBirdeyeTf(tf: string): string {
-    const map: Record<string, string> = {
-      '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1H', '4h': '4H', '1d': '1D',
-    };
-    return map[tf] || '1H';
   }
 
   private delay(ms: number): Promise<void> {

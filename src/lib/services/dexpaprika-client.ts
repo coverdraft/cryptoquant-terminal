@@ -272,7 +272,6 @@ interface DexScreenerPair {
 
 const DEXPAPRIKA_BASE_URL = 'https://api.dexpaprika.com';
 const DEXSCREENER_BASE_URL = 'https://api.dexscreener.com';
-// Birdeye removed - using CoinGecko for OHLCV
 const SOURCE = 'dexpaprika';
 const SOURCE_DS = 'dexscreener';
 const SOURCE_CG = 'coingecko';
@@ -1171,8 +1170,6 @@ export class DexPaprikaClient {
       60_000, // 1 min
     );
   }
-
-  // Birdeye API section removed - CoinGecko is used for OHLCV instead
 
   // ----------------------------------------------------------
   // PRIVATE: Data mapping helpers

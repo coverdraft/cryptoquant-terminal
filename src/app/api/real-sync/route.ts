@@ -10,7 +10,6 @@
  * POST body: { action: "traders" | "candles" | "dna" | "patterns" | "full" }
  *
  * Data Sources:
- *   - BirdeyeClient   → Solana top traders, wallet PnL, smart money discovery
  *   - EtherscanClient → Ethereum active traders, ERC-20 transfers
  *   - OHLCVPipeline   → Real OHLCV candles via CoinGecko / DexPaprika
  *   - WalletProfiler  → Score calculation, pattern detection, classification
@@ -97,23 +96,11 @@ interface SyncBody {
 // CHAIN MAPPING
 // ════════════════════════════════════════════════════════════════════════════
 
-/** Map internal chain IDs to Birdeye chain parameter */
-const BIRDEYE_CHAIN_MAP: Record<string, string> = {
-  SOL: 'solana',
-  ETH: 'ethereum',
-  BSC: 'bsc',
-  BASE: 'base',
-  ARB: 'arbitrum',
-  MATIC: 'polygon',
-  AVAX: 'avalanche',
-  OP: 'optimism',
-};
-
-/** Chains that support Birdeye top traders */
-const BIRDEYE_CHAINS = new Set(['SOL', 'ETH', 'BSC', 'BASE', 'ARB', 'MATIC', 'AVAX', 'OP']);
-
 /** Chains that support Etherscan trader discovery */
 const ETHERSCAN_CHAINS = new Set(['ETH']);
+
+/** Chains that can use DexScreener for trader activity estimation */
+const DEXSCREENER_CHAINS = new Set(['SOL', 'ETH', 'BSC', 'BASE', 'ARB', 'MATIC', 'AVAX', 'OP']);
 
 /** Rate-limit delay between token scans (ms) */
 const TOKEN_DELAY_MS = 200;
@@ -194,10 +181,10 @@ function normalizeAction(action: string): string {
 type TraderAnalytics = import('@/lib/services/wallet-profiler').TraderAnalytics;
 
 /**
- * Build TraderAnalytics from REAL Birdeye top trader data.
+ * Build TraderAnalytics from discovered trader data (Etherscan or DexScreener).
  * NO random values — everything computed from real metrics.
  */
-function buildAnalyticsFromBirdeyeTopTrader(
+function buildAnalyticsFromDiscoveredTrader(
   trader: { buys: number; sells: number; volumeUsd: number; pnlUsd: number; avgHoldTime: number; winRate: number; isBot: boolean },
   token: { address: string; symbol: string; chain: string; priceUsd: number },
 ): TraderAnalytics {
@@ -354,55 +341,64 @@ function buildAnalyticsFromEtherscanTrader(
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * Create TraderTransaction records from Birdeye wallet transaction history.
+ * Create TraderTransaction records from wallet transaction data.
+ * Uses Etherscan for ETH chains. For non-ETH chains, skips gracefully.
  */
-async function createBirdeyeTransactions(
+async function createWalletTransactions(
   traderId: string,
   walletAddress: string,
   token: { address: string; symbol: string; chain: string },
-  birdeyeChain: string,
   result: SyncResult,
 ): Promise<void> {
   const { db } = await import('@/lib/db');
-  const { birdeyeClient } = await import('@/lib/services/birdeye-client');
+
+  // Only Etherscan can provide transaction data
+  if (!ETHERSCAN_CHAINS.has(token.chain)) {
+    return; // Skip non-ETH chains
+  }
 
   try {
-    const { transactions } = await birdeyeClient.getWalletTransactionHistory(
-      walletAddress,
-      birdeyeChain,
-      20,
-    );
+    const { etherscanClient } = await import('@/lib/services/etherscan-client');
+    const transfers = await etherscanClient.getWalletTokenTransfers(walletAddress);
 
-    for (const tx of transactions) {
-      if (!tx.txHash || tx.txHash.length < 5) continue;
+    // Filter transfers involving this token
+    const relevantTransfers = transfers.filter(
+      t => t.contractAddress.toLowerCase() === token.address.toLowerCase(),
+    ).slice(0, 30);
+
+    for (const transfer of relevantTransfers) {
+      if (!transfer.hash || transfer.hash.length < 5) continue;
 
       try {
         const existing = await db.traderTransaction.findUnique({
-          where: { txHash: tx.txHash },
+          where: { txHash: transfer.hash },
           select: { id: true },
         });
         if (existing) continue;
 
-        const action = normalizeAction(tx.action);
+        const isBuy = transfer.to.toLowerCase() === walletAddress.toLowerCase();
+        const action = isBuy ? 'BUY' : 'SELL';
 
         await db.traderTransaction.create({
           data: {
             traderId,
-            txHash: tx.txHash,
-            blockTime: tx.blockTime > 0 ? new Date(tx.blockTime * 1000) : new Date(),
+            txHash: transfer.hash,
+            blockTime: parseInt(transfer.timeStamp, 10) > 0
+              ? new Date(parseInt(transfer.timeStamp, 10) * 1000)
+              : new Date(),
             chain: token.chain,
-            dex: tx.dex || 'unknown',
             action,
-            tokenAddress: tx.tokenAddress || token.address,
-            tokenSymbol: tx.tokenSymbol || token.symbol,
-            amountIn: tx.amountIn || 0,
-            amountOut: tx.amountOut || 0,
-            valueUsd: tx.valueUsd || 0,
-            priceUsd: tx.amountOut > 0 ? tx.valueUsd / tx.amountOut : 0,
+            tokenAddress: transfer.contractAddress,
+            tokenSymbol: transfer.tokenSymbol,
+            amountIn: isBuy ? Number(transfer.value) / Math.pow(10, parseInt(transfer.tokenDecimal || '18', 10)) : 0,
+            amountOut: isBuy ? 0 : Number(transfer.value) / Math.pow(10, parseInt(transfer.tokenDecimal || '18', 10)),
+            valueUsd: 0,
+            gasUsed: parseFloat(transfer.gasUsed) || null,
+            gasPrice: parseFloat(transfer.gasPrice) || null,
             metadata: JSON.stringify({
-              source: 'real-sync-birdeye',
-              fromAddress: tx.fromAddress,
-              toAddress: tx.toAddress,
+              source: 'real-sync-etherscan',
+              from: transfer.from,
+              to: transfer.to,
             }),
           },
         });
@@ -412,7 +408,7 @@ async function createBirdeyeTransactions(
       }
     }
   } catch (err) {
-    result.errors.push(`Birdeye txs for ${walletAddress.slice(0, 8)}: ${String(err)}`);
+    result.errors.push(`Wallet txs for ${walletAddress.slice(0, 8)}: ${String(err)}`);
   }
 }
 
@@ -486,23 +482,27 @@ async function createEtherscanTransactions(
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// HOLDINGS CREATION — From real Birdeye wallet PnL data
+// HOLDINGS CREATION — From Etherscan wallet data
 // ════════════════════════════════════════════════════════════════════════════
 
-async function createBirdeyeHoldings(
+async function createWalletHoldings(
   traderId: string,
   walletAddress: string,
   chain: string,
-  birdeyeChain: string,
   result: SyncResult,
 ): Promise<void> {
   const { db } = await import('@/lib/db');
-  const { birdeyeClient } = await import('@/lib/services/birdeye-client');
+
+  // Only Etherscan can provide wallet holdings data
+  if (!ETHERSCAN_CHAINS.has(chain)) {
+    return; // Skip non-ETH chains
+  }
 
   try {
-    const walletTokens = await birdeyeClient.getWalletPnL(walletAddress, birdeyeChain);
+    const { etherscanClient } = await import('@/lib/services/etherscan-client');
+    const walletPnL = await etherscanClient.getWalletPnL(walletAddress);
 
-    for (const wt of walletTokens.slice(0, 20)) {
+    for (const wt of walletPnL.slice(0, 20)) {
       if (!wt.address || wt.valueUsd <= 0) continue;
 
       try {
@@ -548,7 +548,7 @@ async function createBirdeyeHoldings(
       }
     }
   } catch (err) {
-    result.errors.push(`Birdeye holdings for ${walletAddress.slice(0, 8)}: ${String(err)}`);
+    result.errors.push(`Wallet holdings for ${walletAddress.slice(0, 8)}: ${String(err)}`);
   }
 }
 
@@ -759,7 +759,6 @@ function detectCandlePatterns(
 
 async function runTraders(result: SyncResult): Promise<void> {
   const { db } = await import('@/lib/db');
-  const { birdeyeClient } = await import('@/lib/services/birdeye-client');
   const { etherscanClient } = await import('@/lib/services/etherscan-client');
   const {
     calculateSmartMoneyScore,
@@ -769,7 +768,7 @@ async function runTraders(result: SyncResult): Promise<void> {
     buildWalletProfile,
   } = await import('@/lib/services/wallet-profiler');
 
-  console.log('[RealSync] === TRADERS: Discovering real wallets from Birdeye + Etherscan ===');
+  console.log('[RealSync] === TRADERS: Discovering real wallets from Etherscan ===');
 
   // 1. Get top 50 tokens by volume from DB
   const topTokens = await db.token.findMany({
@@ -787,276 +786,31 @@ async function runTraders(result: SyncResult): Promise<void> {
     updateProgress((i / topTokens.length) * 100, `Scanning ${token.symbol} (${i + 1}/${topTokens.length})`);
 
     try {
-      // ── Solana / Birdeye-supported chains ──
-      if (BIRDEYE_CHAINS.has(token.chain)) {
-        const birdeyeChain = BIRDEYE_CHAIN_MAP[token.chain] ?? 'solana';
+      // ── Non-ETH chains: Use DexScreener for trader activity estimation ──
+      // For non-Ethereum chains, we estimate
+      // trader activity from DexScreener transaction counts.
+      if (!ETHERSCAN_CHAINS.has(token.chain)) {
+        try {
+          const { dexScreenerClient } = await import('@/lib/services/dexscreener-client');
+          const pairs = await dexScreenerClient.searchTokenPairs(token.address);
+          if (pairs.length > 0) {
+            const best = pairs.reduce((a, b) =>
+              (b.liquidity?.usd || 0) > (a.liquidity?.usd || 0) ? b : a,
+            );
+            const buyCount = best.txns?.h24?.buys || 0;
+            const sellCount = best.txns?.h24?.sells || 0;
+            const totalTxCount = buyCount + sellCount;
 
-        const topTraders = await birdeyeClient.getTokenTopTraders(
-          token.address,
-          birdeyeChain,
-          20,
-        );
-
-        if (topTraders.length > 0) {
-          result.walletsDiscovered += topTraders.length;
-
-          for (const trader of topTraders) {
-            if (!trader.address || trader.address.length < 5) continue;
-
-            try {
-              // 4a. Check if trader already exists in DB
-              const existingTrader = await db.trader.findUnique({
-                where: { address: trader.address },
+            if (totalTxCount > 0) {
+              await db.token.update({
+                where: { id: token.id },
+                data: { uniqueWallets24h: totalTxCount },
               });
-
-              // Build analytics from REAL Birdeye data
-              const analytics = buildAnalyticsFromBirdeyeTopTrader(trader, token);
-
-              // 4d. Calculate scores using wallet-profiler functions
-              const smartMoneyScore = calculateSmartMoneyScore(analytics);
-              const whaleScore = calculateWhaleScore(analytics);
-              const sniperScore = calculateSniperScore(analytics);
-              const patterns = detectBehavioralPatterns(analytics);
-              const profile = buildWalletProfile(trader.address, token.chain, analytics);
-
-              // 4e. Classify
-              const primaryLabel = profile.primaryLabel;
-              const isBot = profile.botProbability > 0.5;
-
-              if (existingTrader) {
-                // 4c. If existing: Update metrics
-                const newTotalTrades = existingTrader.totalTrades + trader.buys + trader.sells;
-                const newTotalVolume = existingTrader.totalVolumeUsd + trader.volumeUsd;
-
-                await db.trader.update({
-                  where: { id: existingTrader.id },
-                  data: {
-                    lastActive: new Date(),
-                    totalTrades: newTotalTrades,
-                    totalVolumeUsd: newTotalVolume,
-                    avgTradeSizeUsd: newTotalTrades > 0
-                      ? newTotalVolume / newTotalTrades
-                      : existingTrader.avgTradeSizeUsd,
-                    totalPnl: existingTrader.totalPnl + trader.pnlUsd,
-                    winRate: trader.winRate > 0
-                      ? (existingTrader.winRate * existingTrader.totalTrades + trader.winRate * (trader.buys + trader.sells)) / newTotalTrades
-                      : existingTrader.winRate,
-                    smartMoneyScore: Math.round(
-                      (existingTrader.smartMoneyScore * 0.7 + smartMoneyScore * 0.3) * 100
-                    ) / 100,
-                    whaleScore: Math.round(
-                      (existingTrader.whaleScore * 0.7 + whaleScore * 0.3) * 100
-                    ) / 100,
-                    sniperScore: Math.round(
-                      (existingTrader.sniperScore * 0.7 + sniperScore * 0.3) * 100
-                    ) / 100,
-                    isSmartMoney: smartMoneyScore > 50 || existingTrader.isSmartMoney,
-                    isWhale: whaleScore > 50 || existingTrader.isWhale,
-                    isSniper: sniperScore > 50 || existingTrader.isSniper,
-                    isBot: isBot || existingTrader.isBot,
-                    botType: isBot ? inferBotType(profile) : existingTrader.botType,
-                    botConfidence: Math.max(
-                      Math.round(profile.botProbability * 100) / 100,
-                      existingTrader.botConfidence,
-                    ),
-                    primaryLabel: primaryLabel !== 'UNKNOWN'
-                      ? primaryLabel
-                      : existingTrader.primaryLabel,
-                    labelConfidence: Math.max(profile.labelConfidence, existingTrader.labelConfidence),
-                    lastAnalyzed: new Date(),
-                    analysisVersion: (existingTrader.analysisVersion || 1) + 1,
-                    avgHoldTimeMin: trader.avgHoldTime > 0
-                      ? trader.avgHoldTime / 60
-                      : existingTrader.avgHoldTimeMin,
-                  },
-                });
-                result.tradersUpdated++;
-              } else {
-                // 4b. If new: Create Trader record with data from API
-                await db.trader.create({
-                  data: {
-                    address: trader.address,
-                    chain: token.chain || 'SOL',
-                    primaryLabel,
-                    subLabels: JSON.stringify([primaryLabel]),
-                    labelConfidence: Math.round(profile.labelConfidence * 100) / 100,
-                    isBot,
-                    botType: isBot ? inferBotType(profile) : null,
-                    botConfidence: Math.round(profile.botProbability * 100) / 100,
-                    botDetectionSignals: JSON.stringify(
-                      isBot ? ['birdeye_isBot_flag', 'timing_analysis'] : (trader.isBot ? ['birdeye_isBot_flag'] : [])
-                    ),
-                    totalTrades: trader.buys + trader.sells,
-                    winRate: trader.winRate,
-                    avgPnl: (trader.buys + trader.sells) > 0 ? trader.pnlUsd / (trader.buys + trader.sells) : 0,
-                    totalPnl: trader.pnlUsd,
-                    avgHoldTimeMin: trader.avgHoldTime / 60,
-                    avgTradeSizeUsd: (trader.buys + trader.sells) > 0
-                      ? trader.volumeUsd / (trader.buys + trader.sells)
-                      : 0,
-                    largestTradeUsd: trader.volumeUsd * 0.3,
-                    totalVolumeUsd: trader.volumeUsd,
-                    sharpeRatio: analytics.sharpeRatio,
-                    profitFactor: analytics.profitFactor,
-                    maxDrawdown: analytics.maxDrawdown,
-                    washTradeScore: analytics.washTradeScore,
-                    copyTradeScore: analytics.copyTradeScore,
-                    consistencyScore: analytics.consistencyScore,
-                    avgTimeBetweenTrades: analytics.avgTimeBetweenTradesMin,
-                    isActiveAtNight: analytics.isActive247,
-                    isActive247: analytics.isActive247,
-                    isSmartMoney: smartMoneyScore > 50,
-                    smartMoneyScore: Math.round(smartMoneyScore * 100) / 100,
-                    earlyEntryCount: analytics.earlyEntryCount,
-                    avgEntryRank: analytics.avgEntryRank,
-                    avgExitMultiplier: analytics.avgExitMultiplier,
-                    isWhale: whaleScore > 50,
-                    whaleScore: Math.round(whaleScore * 100) / 100,
-                    totalHoldingsUsd: analytics.totalHoldingsUsd,
-                    avgPositionUsd: analytics.avgTradeSizeUsd,
-                    isSniper: sniperScore > 50,
-                    sniperScore: Math.round(sniperScore * 100) / 100,
-                    uniqueTokensTraded: 1,
-                    preferredChains: JSON.stringify([token.chain]),
-                    preferredDexes: JSON.stringify([token.dex || 'unknown']),
-                    tradingHourPattern: JSON.stringify(analytics.tradingHourPattern),
-                    firstSeen: trader.firstBuyTime > 0 ? new Date(trader.firstBuyTime * 1000) : new Date(),
-                    lastActive: new Date(),
-                    lastAnalyzed: new Date(),
-                    dataQuality: 0.5,
-                  },
-                });
-                result.tradersCreated++;
-              }
-
-              // Get the trader record
-              const dbTrader = await db.trader.findUnique({
-                where: { address: trader.address },
-                select: { id: true },
-              });
-
-              if (dbTrader) {
-                // 4h. Create TraderTransaction records
-                await createBirdeyeTransactions(
-                  dbTrader.id, trader.address, token, birdeyeChain, result,
-                );
-
-                // 4i. Create WalletTokenHolding records
-                await createBirdeyeHoldings(
-                  dbTrader.id, trader.address, token.chain, birdeyeChain, result,
-                );
-
-                // 4f. Create/update TraderBehaviorPattern records
-                for (const pattern of patterns.slice(0, 5)) {
-                  try {
-                    const existingPattern = await db.traderBehaviorPattern.findFirst({
-                      where: { traderId: dbTrader.id, pattern: pattern.pattern },
-                    });
-
-                    if (existingPattern) {
-                      await db.traderBehaviorPattern.update({
-                        where: { id: existingPattern.id },
-                        data: {
-                          confidence: Math.max(existingPattern.confidence, pattern.confidence),
-                          dataPoints: Math.max(existingPattern.dataPoints, pattern.dataPoints),
-                          lastObserved: new Date(),
-                        },
-                      });
-                      result.patternsUpdated++;
-                    } else {
-                      await db.traderBehaviorPattern.create({
-                        data: {
-                          traderId: dbTrader.id,
-                          pattern: pattern.pattern,
-                          confidence: Math.round(pattern.confidence * 100) / 100,
-                          dataPoints: pattern.dataPoints,
-                          firstObserved: new Date(),
-                          lastObserved: new Date(),
-                          metadata: JSON.stringify({ description: pattern.description, source: 'real-sync-birdeye' }),
-                        },
-                      });
-                      result.patternsCreated++;
-                    }
-                  } catch (err) {
-                    result.errors.push(`Pattern ${pattern.pattern} for ${trader.address.slice(0, 8)}: ${String(err)}`);
-                  }
-                }
-
-                // 4g. Create TraderLabelAssignment records
-                const labels: Array<{ label: string; confidence: number; evidence: string[] }> = [];
-                if (smartMoneyScore > 50) {
-                  labels.push({
-                    label: 'SMART_MONEY',
-                    confidence: smartMoneyScore / 100,
-                    evidence: [`smartMoneyScore=${smartMoneyScore.toFixed(1)}`, `winRate=${trader.winRate.toFixed(2)}`, `pnlUsd=${trader.pnlUsd.toFixed(0)}`],
-                  });
-                }
-                if (whaleScore > 50) {
-                  labels.push({
-                    label: 'WHALE',
-                    confidence: whaleScore / 100,
-                    evidence: [`whaleScore=${whaleScore.toFixed(1)}`, `volumeUsd=${trader.volumeUsd.toFixed(0)}`],
-                  });
-                }
-                if (sniperScore > 50) {
-                  labels.push({
-                    label: 'SNIPER',
-                    confidence: sniperScore / 100,
-                    evidence: [`sniperScore=${sniperScore.toFixed(1)}`, `avgHoldTime=${(trader.avgHoldTime / 60).toFixed(0)}min`],
-                  });
-                }
-                if (isBot || trader.isBot) {
-                  labels.push({
-                    label: trader.isBot ? 'BOT_MEV' : 'BOT',
-                    confidence: Math.max(profile.botProbability, trader.isBot ? 0.7 : 0),
-                    evidence: [`isBot=${trader.isBot}`, `botProb=${profile.botProbability.toFixed(2)}`],
-                  });
-                }
-                if (primaryLabel === 'RETAIL') {
-                  labels.push({
-                    label: 'RETAIL',
-                    confidence: 0.5,
-                    evidence: [`primaryLabel=RETAIL`, `volumeUsd=${trader.volumeUsd.toFixed(0)}`],
-                  });
-                }
-
-                for (const labelData of labels) {
-                  try {
-                    const existingLabel = await db.traderLabelAssignment.findFirst({
-                      where: { traderId: dbTrader.id, label: labelData.label, source: 'ALGORITHM' },
-                    });
-
-                    if (existingLabel) {
-                      await db.traderLabelAssignment.update({
-                        where: { id: existingLabel.id },
-                        data: {
-                          confidence: Math.max(existingLabel.confidence, labelData.confidence),
-                          evidence: JSON.stringify(labelData.evidence),
-                          assignedAt: new Date(),
-                        },
-                      });
-                    } else {
-                      await db.traderLabelAssignment.create({
-                        data: {
-                          traderId: dbTrader.id,
-                          label: labelData.label,
-                          source: 'ALGORITHM',
-                          confidence: Math.round(labelData.confidence * 100) / 100,
-                          evidence: JSON.stringify(labelData.evidence),
-                          assignedAt: new Date(),
-                        },
-                      });
-                      result.labelsCreated++;
-                    }
-                  } catch (err) {
-                    result.errors.push(`Label ${labelData.label} for ${trader.address.slice(0, 8)}: ${String(err)}`);
-                  }
-                }
-              }
-            } catch (err) {
-              result.errors.push(`Birdeye wallet ${trader.address.slice(0, 8)}: ${String(err)}`);
+              result.walletsDiscovered += totalTxCount;
             }
           }
+        } catch {
+          // DexScreener trader estimation failed — skip
         }
       }
 

@@ -914,11 +914,11 @@ async function runSeed(action: SeedAction): Promise<SeedResult> {
   // ══════════════════════════════════════════════════════════
   // STEP 10: Trader seeding — REMOVED (was all fake data)
   // Use /api/real-sync with action:'traders' for real wallet data
-  // from Birdeye/Etherscan
+  // from Etherscan
   // ══════════════════════════════════════════════════════════
   if (action === 'traders') {
     console.log('[Seed] === STEP 10: Trader seeding is NO LONGER supported with fake data ===');
-    console.log('[Seed] Use POST /api/real-sync with { action: "traders" } for real wallet data from Birdeye/Etherscan');
+    console.log('[Seed] Use POST /api/real-sync with { action: "traders" } for real wallet data from Etherscan');
     // Return early with the redirect message
     result.tradersCreated = 0;
     return result;
@@ -1193,7 +1193,7 @@ export async function POST(request: NextRequest) {
       message: 'Trader seeding with fake/random data has been removed. Use the real-sync endpoint for actual wallet data.',
       redirect: 'POST /api/real-sync',
       actions: {
-        traders: 'POST /api/real-sync { "action": "traders" } — Fetch real wallet data from Birdeye/Etherscan',
+        traders: 'POST /api/real-sync { "action": "traders" } — Fetch real wallet data from Etherscan',
         candles: 'POST /api/real-sync { "action": "candles" } — Fetch real OHLCV data',
         dna: 'POST /api/real-sync { "action": "dna" } — Recompute DNA from latest data',
         full: 'POST /api/real-sync { "action": "full" } — Sync everything',

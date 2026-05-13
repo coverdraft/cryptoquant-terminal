@@ -36,7 +36,7 @@ export interface CacheEntry<T = unknown> {
   data: T;
   timestamp: number;
   ttl: number;        // Time-to-live in ms
-  source: string;     // e.g. 'dexpaprika', 'birdeye', 'dexscreener'
+  source: string;     // e.g. 'dexpaprika', 'dexscreener', 'coingecko'
   key: string;
   hitCount: number;
   sizeEstimate: number; // Approximate bytes
@@ -91,11 +91,6 @@ export const DEFAULT_CACHE_CONFIG: CacheConfig = {
     'dexpaprika:tokens': 120_000,       // 2 min
     'dexpaprika:chains': 86400_000,     // 24h (rarely changes)
     'dexpaprika:ohlcv': 60_000,         // 1 min
-    // Birdeye
-    'birdeye:price': 15_000,            // 15s
-    'birdeye:ohlcv': 60_000,            // 1 min
-    'birdeye:tokenlist': 300_000,       // 5 min
-    'birdeye:wallet': 120_000,          // 2 min
     // DexScreener
     'dexscreener:search': 120_000,      // 2 min
     'dexscreener:token': 60_000,        // 1 min

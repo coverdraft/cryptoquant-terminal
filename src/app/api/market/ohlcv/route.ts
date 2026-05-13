@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * If no candles exist for the requested token, fetches ON-DEMAND
  * from CoinGecko (free API) and stores them for future requests.
  *
- * Data sources: CoinGecko + DexScreener (NO Birdeye)
+ * Data sources: CoinGecko + DexScreener
  */
 
 // Timeframe to CoinGecko days parameter mapping

@@ -4,7 +4,7 @@
  * Fetches REAL token data from CoinGecko + DexScreener + DexPaprika.
  * Replaces fake seed data with real market data.
  *
- * NO Birdeye. Only free APIs:
+ * Only free APIs:
  *   - CoinGecko: market data, OHLCV candles, trending, search
  *   - DexScreener: liquidity, pair data, buy/sell ratios
  *   - DexPaprika: token search, pool data, cross-chain

@@ -244,7 +244,7 @@ export function aggregateCandles(
 
 export class OHLCVPipeline {
   constructor() {
-    // CoinGecko is the ONLY OHLCV source (Birdeye removed).
+    // CoinGecko is the ONLY OHLCV source.
   }
 
   // ----------------------------------------------------------

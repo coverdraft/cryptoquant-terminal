@@ -10,6 +10,8 @@ import { IntelligenceModules } from '@/components/dashboard/intelligence-modules
 import { TraderIntelligencePanel } from '@/components/dashboard/trader-intelligence';
 import TradingSystemsLab from '@/components/dashboard/trading-systems-lab';
 import AIStrategyOptimizer from '@/components/dashboard/ai-strategy-optimizer';
+import TradeHistoryPanel from '@/components/dashboard/trade-history-panel';
+import StrategyStateTracker from '@/components/dashboard/strategy-state-tracker';
 import BacktestingLab from '@/components/dashboard/backtesting-lab';
 import BigDataPredictive from '@/components/dashboard/big-data-predictive';
 import BrainControl from '@/components/dashboard/brain-control';
@@ -72,24 +74,38 @@ const NAV_ITEMS: NavItem[] = [
 
 function StrategyLabContent() {
   return (
-    <Tabs defaultValue="classic" className="flex-1 flex flex-col min-h-0">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#1e293b] bg-[#0d1117] shrink-0">
-        <TabsList className="bg-[#1a1f2e] h-7">
-          <TabsTrigger value="classic" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
-            Classic
-          </TabsTrigger>
-          <TabsTrigger value="ai-optimizer" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
-            🤖 AI Manager
-          </TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent value="classic" className="flex-1 min-h-0 mt-0">
-        <TradingSystemsLab />
-      </TabsContent>
-      <TabsContent value="ai-optimizer" className="flex-1 min-h-0 mt-0 overflow-y-auto">
-        <AIStrategyOptimizer />
-      </TabsContent>
-    </Tabs>
+    <div className="flex-1 flex flex-col min-h-0">
+      <Tabs defaultValue="ai-optimizer" className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#1e293b] bg-[#0d1117] shrink-0">
+          <TabsList className="bg-[#1a1f2e] h-7">
+            <TabsTrigger value="ai-optimizer" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+              🤖 AI Manager
+            </TabsTrigger>
+            <TabsTrigger value="classic" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+              Classic
+            </TabsTrigger>
+            <TabsTrigger value="trade-history" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+              📊 Trade History
+            </TabsTrigger>
+            <TabsTrigger value="strategy-states" className="text-[10px] font-mono h-6 px-3 data-[state=active]:bg-[#d4af37]/20 data-[state=active]:text-[#d4af37]">
+              📋 Strategy States
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="classic" className="flex-1 min-h-0 mt-0">
+          <TradingSystemsLab />
+        </TabsContent>
+        <TabsContent value="ai-optimizer" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+          <AIStrategyOptimizer />
+        </TabsContent>
+        <TabsContent value="trade-history" className="flex-1 min-h-0 mt-0">
+          <TradeHistoryPanel />
+        </TabsContent>
+        <TabsContent value="strategy-states" className="flex-1 min-h-0 mt-0">
+          <StrategyStateTracker />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 

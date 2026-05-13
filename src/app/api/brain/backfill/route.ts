@@ -6,7 +6,7 @@ import { db } from '@/lib/db';
  * POST /api/brain/backfill
  * 
  * Historical data backfill using the Universal Data Extractor (8 sources).
- * Replaces the legacy HistoricalDataExtractor (Birdeye-dependent).
+ * Replaces the legacy HistoricalDataExtractor.
  * 
  * Sources: Moralis + Helius + CoinGecko + DexScreener + DeFi Llama +
  *          Etherscan + CryptoDataDownload + SQD(Subsquid)

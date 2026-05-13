@@ -73,17 +73,6 @@ export interface DexScreenerToken {
   info?: { imageUrl: string; websites: { url: string }[]; socials: { type: string; url: string }[] };
 }
 
-export interface BirdeyePriceData {
-  address: string;
-  symbol: string;
-  name: string;
-  price: number;
-  priceChange24h: number;
-  volume24h: number;
-  marketCap: number;
-  liquidity: number;
-}
-
 export interface JupiterSwapEvent {
   swapEvent: {
     inputMint: string;
@@ -229,46 +218,8 @@ export class DexScreenerClient {
   }
 }
 
-// ============================================================
-// BIRDEYE CLIENT STUB - DEPRECATED (use CoinGecko instead)
-// Kept for backward compatibility with existing imports.
-// ============================================================
-
-export class BirdeyeClient {
-  constructor(_baseUrl?: string, _apiKey?: string) {
-    // Birdeye is no longer available - use CoinGecko instead
-  }
-  
-  async getPrice(_address: string, _chain?: string): Promise<BirdeyePriceData | null> {
-    console.warn('[Birdeye] DEPRECATED: Use CoinGecko instead.');
-    return null;
-  }
-  
-  async getOHLCV(
-    _address: string,
-    _timeframe?: string,
-    _limit?: number,
-    _chain?: string,
-  ): Promise<Array<{ unixTime: number; open: number; high: number; low: number; close: number; volume: number }>> {
-    console.warn('[Birdeye] DEPRECATED: Use CoinGecko instead.');
-    return [];
-  }
-  
-  async getTokenList(_sort?: string, _sortType?: string, _limit?: number, _chain?: string): Promise<BirdeyePriceData[]> {
-    console.warn('[Birdeye] DEPRECATED: Use CoinGecko trending instead.');
-    return [];
-  }
-  
-  async getWalletTransactions(_address: string, _limit?: number, _chain?: string): Promise<ParsedTransaction[]> {
-    console.warn('[Birdeye] DEPRECATED: Use Solana RPC instead.');
-    return [];
-  }
-  
-  async getNewListings(_limit?: number, _chain?: string): Promise<BirdeyePriceData[]> {
-    console.warn('[Birdeye] DEPRECATED: Use CoinGecko trending instead.');
-    return [];
-  }
-}
+// Use CoinGecko for price/market data
+// and Etherscan for wallet transactions.
 
 // ============================================================
 // JUPITER CLIENT - Solana swap aggregator
@@ -474,7 +425,6 @@ export class EthereumRpcClient {
 
 export class DataIngestionPipeline {
   private dexscreener: DexScreenerClient;
-  private birdeye: BirdeyeClient; // DEPRECATED stub - use coingecko instead
   private jupiter: JupiterClient;
   private solana: SolanaRpcClient;
   private ethereum: EthereumRpcClient;
@@ -484,7 +434,6 @@ export class DataIngestionPipeline {
   constructor(config: Partial<IngestionConfig> = {}) {
     const merged = { ...DEFAULT_CONFIG, ...config };
     this.dexscreener = new DexScreenerClient(merged.dexscreenerApiUrl);
-    this.birdeye = new BirdeyeClient(); // DEPRECATED - stub only
     this.jupiter = new JupiterClient(merged.jupiterApiUrl);
     this.solana = new SolanaRpcClient(merged.solanaRpcUrl);
     this.ethereum = new EthereumRpcClient(merged.ethereumRpcUrl);
@@ -492,20 +441,19 @@ export class DataIngestionPipeline {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { DexPaprikaClient } = require('./dexpaprika-client');
     this.dexpaprika = new DexPaprikaClient();
-    // CoinGecko - PRIMARY free data source for market data (replaces Birdeye)
+    // CoinGecko - PRIMARY free data source for market data
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { CoinGeckoClient } = require('./coingecko-client');
     this.coingecko = new CoinGeckoClient(merged.coingeckoApiUrl);
   }
   
   /**
-   * Sync token data from CoinGecko (PRIMARY) + DexScreener + DexPaprika + Birdeye (optional)
+   * Sync token data from CoinGecko (PRIMARY) + DexScreener + DexPaprika
    *
    * Priority:
    *   1. CoinGecko - market data (prices, volumes, market caps) [FREE, no key]
    *   2. DexScreener - DEX-specific data (pairs, pools, buy/sell) [FREE]
    *   3. DexPaprika - 35-chain pool data [FREE]
-   *   4. Birdeye - only if API key is configured [OPTIONAL]
    */
   async syncTokenData(chainId = 'solana') {
     // CoinGecko as PRIMARY source for market data
@@ -522,7 +470,7 @@ export class DataIngestionPipeline {
     // DexPaprika for 35-chain pool data with buy/sell ratios
     const dpPoolsPromise = this.dexpaprika.getPools(chainId, 50).catch(() => ({ pools: [], cursor: undefined }));
 
-    // CoinGecko trending as supplementary source (replaces Birdeye)
+    // CoinGecko trending as supplementary source
     const cgTrendingPromise = this.coingecko.getTrending().catch(() => []);
 
     const [dexTokens, cgTrending, dpPools] = await Promise.all([
@@ -542,7 +490,7 @@ export class DataIngestionPipeline {
       coinGeckoAsDexTokens,
       // DexScreener tokens (DEX-specific data)
       dexTokens: dexTokens.filter(t => t.chainId === chainId),
-      // Birdeye tokens (optional, only if API key)
+      // CoinGecko trending tokens
       cgTrending,
       // DexPaprika pools
       dexpaprikaPools: dpPools.pools,
@@ -575,7 +523,6 @@ export class DataIngestionPipeline {
         }
       }
       
-      // Birdeye is deprecated - no wallet enrichment available
       // For wallet data, use Solana RPC or Helius API
       
       return {
@@ -683,7 +630,22 @@ export class DataIngestionPipeline {
    * Get new token listings
    */
   async getNewListings(chain = 'solana') {
-    return this.birdeye.getNewListings(20, chain);
+    // Use CoinGecko trending instead
+    try {
+      const trending = await this.coingecko.getTrending();
+      return trending.map(t => ({
+        address: t.item?.id || '',
+        symbol: t.item?.symbol || '',
+        name: t.item?.name || '',
+        price: 0,
+        priceChange24h: 0,
+        volume24h: 0,
+        marketCap: 0,
+        liquidity: 0,
+      }));
+    } catch {
+      return [];
+    }
   }
   
   /**
@@ -709,8 +671,6 @@ export class DataIngestionPipeline {
 
   // Getters for individual clients
   getDexScreener() { return this.dexscreener; }
-  /** @deprecated Use getCoinGecko() instead - Birdeye is no longer supported */
-  getBirdeye() { return this.birdeye; }
   getJupiter() { return this.jupiter; }
   getSolana() { return this.solana; }
   getEthereum() { return this.ethereum; }

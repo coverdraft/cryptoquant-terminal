@@ -22,7 +22,6 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { birdeyeClient } from '@/lib/services/birdeye-client';
 import { etherscanClient } from '@/lib/services/etherscan-client';
 import { dexScreenerClient } from '@/lib/services/dexscreener-client';
 import { coinGeckoClient } from '@/lib/services/coingecko-client';
@@ -209,247 +208,55 @@ async function stepTraderDiscovery(errors: string[]): Promise<{
   let tradersDiscovered = 0;
   let tradersUpdated = 0;
 
-  // --- Solana traders via Birdeye ---
+  // --- Solana traders via DexScreener ---
+  // NOTE: Solana-specific trader discovery via external API is limited.
+  // Etherscan can discover traders for
+  // Ethereum-based tokens. For Solana, we use DexScreener transaction data.
   try {
-    if (!birdeyeClient.isConfigured()) {
-      console.warn('[AutoSync] Step 2: Birdeye API key not configured — skipping Solana trader discovery');
-    } else {
-      // Get top 20 Solana tokens
-      const solTokens = await db.token.findMany({
-        where: { chain: 'SOL', volume24h: { gt: 0 } },
-        orderBy: { volume24h: 'desc' },
-        take: 20,
-        select: { id: true, address: true, symbol: true },
-      });
+    // Get top Solana tokens and use DexScreener for trader activity estimation
+    const solTokens = await db.token.findMany({
+      where: { chain: 'SOL', volume24h: { gt: 0 } },
+      orderBy: { volume24h: 'desc' },
+      take: 10,
+      select: { id: true, address: true, symbol: true },
+    });
 
-      console.log(`[AutoSync] Step 2a: Discovering traders for ${solTokens.length} Solana tokens via Birdeye`);
+    console.log(`[AutoSync] Step 2a: Estimating trader activity for ${solTokens.length} Solana tokens via DexScreener`);
 
-      for (const token of solTokens) {
-        try {
-          await rateLimit();
-          const topTraders = await birdeyeClient.getTokenTopTraders(token.address, 'solana', 20);
+    for (const token of solTokens) {
+      try {
+        await rateLimit();
+        // Use DexScreener to get transaction data for the token
+        const pairs = await dexScreenerClient.searchTokenPairs(token.address);
+        if (pairs.length === 0) continue;
 
-          for (const trader of topTraders) {
-            if (!trader.address || trader.address.length < 10) continue;
+        const best = pairs.reduce((a, b) =>
+          (b.liquidity?.usd || 0) > (a.liquidity?.usd || 0) ? b : a,
+        );
 
-            try {
-              // Build TraderAnalytics from real Birdeye data
-              const analytics: TraderAnalytics = {
-                totalTrades: trader.buys + trader.sells,
-                winRate: trader.winRate,
-                avgPnlUsd: trader.pnlUsd / Math.max(1, trader.buys + trader.sells),
-                totalPnlUsd: trader.pnlUsd,
-                avgHoldTimeMin: trader.avgHoldTime / 60, // convert seconds to minutes
-                avgTradeSizeUsd: trader.volumeUsd / Math.max(1, trader.buys + trader.sells),
-                avgEntryRank: 0,
-                earlyEntryCount: 0,
-                avgExitMultiplier: 0,
-                totalHoldingsUsd: 0,
-                uniqueTokensTraded: 1,
-                preferredDexes: [],
-                preferredChains: ['SOL'],
-                sharpeRatio: 0,
-                profitFactor: trader.winRate > 0 ? trader.winRate / Math.max(0.01, 1 - trader.winRate) : 0,
-                maxDrawdown: 0,
-                consistencyScore: 0,
-                washTradeScore: 0,
-                copyTradeScore: 0,
-                frontrunCount: 0,
-                sandwichCount: 0,
-                tradingHourPattern: Array(24).fill(0),
-                isActive247: false,
-                avgTimeBetweenTradesMin: 0,
-              };
+        const buyCount = best.txns?.h24?.buys || 0;
+        const sellCount = best.txns?.h24?.sells || 0;
+        const totalTxCount = buyCount + sellCount;
 
-              // Calculate real scores using wallet-profiler
-              const smartMoneyScore = calculateSmartMoneyScore(analytics);
-              const whaleScore = calculateWhaleScore(analytics);
-              const sniperScore = calculateSniperScore(analytics);
-              const patterns = detectBehavioralPatterns(analytics);
-
-              // Determine primary label from scores
-              let primaryLabel = 'UNKNOWN';
-              let labelConfidence = 0;
-              if (trader.isBot) {
-                primaryLabel = 'BOT_MEV';
-                labelConfidence = 0.7;
-              } else if (smartMoneyScore >= 60) {
-                primaryLabel = 'SMART_MONEY';
-                labelConfidence = smartMoneyScore / 100;
-              } else if (whaleScore >= 50) {
-                primaryLabel = 'WHALE';
-                labelConfidence = whaleScore / 100;
-              } else if (sniperScore >= 50) {
-                primaryLabel = 'SNIPER';
-                labelConfidence = sniperScore / 100;
-              } else {
-                primaryLabel = 'RETAIL';
-                labelConfidence = 0.3;
-              }
-
-              // Create/update Trader record with real data
-              const upserted = await db.trader.upsert({
-                where: { address: trader.address },
-                create: {
-                  address: trader.address,
-                  chain: 'SOL',
-                  primaryLabel,
-                  labelConfidence,
-                  isBot: trader.isBot,
-                  botType: trader.isBot ? 'MEV_EXTRACTOR' : null,
-                  botConfidence: trader.isBot ? 0.7 : 0,
-                  totalTrades: trader.buys + trader.sells,
-                  winRate: trader.winRate,
-                  avgPnl: trader.pnlUsd / Math.max(1, trader.buys + trader.sells),
-                  totalPnl: trader.pnlUsd,
-                  avgHoldTimeMin: trader.avgHoldTime / 60,
-                  avgTradeSizeUsd: trader.volumeUsd / Math.max(1, trader.buys + trader.sells),
-                  totalVolumeUsd: trader.volumeUsd,
-                  isSmartMoney: smartMoneyScore >= 60,
-                  smartMoneyScore,
-                  isWhale: whaleScore >= 50,
-                  whaleScore,
-                  isSniper: sniperScore >= 50,
-                  sniperScore,
-                  lastActive: new Date(),
-                },
-                update: {
-                  primaryLabel,
-                  labelConfidence,
-                  isBot: trader.isBot,
-                  totalTrades: trader.buys + trader.sells,
-                  winRate: trader.winRate,
-                  avgPnl: trader.pnlUsd / Math.max(1, trader.buys + trader.sells),
-                  totalPnl: trader.pnlUsd,
-                  avgHoldTimeMin: trader.avgHoldTime / 60,
-                  avgTradeSizeUsd: trader.volumeUsd / Math.max(1, trader.buys + trader.sells),
-                  totalVolumeUsd: trader.volumeUsd,
-                  isSmartMoney: smartMoneyScore >= 60,
-                  smartMoneyScore,
-                  isWhale: whaleScore >= 50,
-                  whaleScore,
-                  isSniper: sniperScore >= 50,
-                  sniperScore,
-                  lastActive: new Date(),
-                },
-              });
-
-              // Create behavior patterns from real detection
-              for (const pattern of patterns.slice(0, 3)) {
-                try {
-                  await db.traderBehaviorPattern.upsert({
-                    where: {
-                      id: `${upserted.id}_${pattern.pattern}`,
-                    },
-                    create: {
-                      traderId: upserted.id,
-                      pattern: pattern.pattern,
-                      confidence: pattern.confidence,
-                      dataPoints: pattern.dataPoints,
-                      firstObserved: new Date(),
-                      lastObserved: new Date(),
-                      metadata: JSON.stringify({ description: pattern.description }),
-                    },
-                    update: {
-                      confidence: pattern.confidence,
-                      dataPoints: pattern.dataPoints,
-                      lastObserved: new Date(),
-                    },
-                  });
-                } catch {
-                  // Pattern upsert is best-effort
-                }
-              }
-
-              // Create label assignment from real classification
-              try {
-                await db.traderLabelAssignment.create({
-                  data: {
-                    traderId: upserted.id,
-                    label: primaryLabel,
-                    source: 'ALGORITHM',
-                    confidence: labelConfidence,
-                    evidence: JSON.stringify([
-                      `smartMoneyScore: ${smartMoneyScore}`,
-                      `whaleScore: ${whaleScore}`,
-                      `sniperScore: ${sniperScore}`,
-                      `isBot: ${trader.isBot}`,
-                      `winRate: ${trader.winRate}`,
-                    ]),
-                  },
-                });
-              } catch {
-                // Label assignment is best-effort
-              }
-
-              // Create transaction record from real trade data
-              try {
-                const txHash = `birdeye_${trader.address}_${token.address}_${Date.now()}`;
-                await db.traderTransaction.create({
-                  data: {
-                    traderId: upserted.id,
-                    txHash,
-                    blockTime: new Date(trader.firstBuyTime * 1000 || Date.now()),
-                    chain: 'SOL',
-                    action: trader.buys > trader.sells ? 'BUY' : 'SELL',
-                    tokenAddress: token.address,
-                    tokenSymbol: token.symbol,
-                    valueUsd: trader.volumeUsd / Math.max(1, trader.buys + trader.sells),
-                    amountIn: trader.buys,
-                    amountOut: trader.sells,
-                    priceUsd: 0,
-                  },
-                });
-              } catch {
-                // Transaction record is best-effort
-              }
-
-              // Create/update wallet token holding from real data
-              try {
-                await db.walletTokenHolding.upsert({
-                  where: {
-                    id: `${upserted.id}_${token.address}`,
-                  },
-                  create: {
-                    traderId: upserted.id,
-                    tokenAddress: token.address,
-                    tokenSymbol: token.symbol,
-                    chain: 'SOL',
-                    buyCount: trader.buys,
-                    sellCount: trader.sells,
-                    totalBoughtUsd: trader.volumeUsd * (trader.buys / Math.max(1, trader.buys + trader.sells)),
-                    totalSoldUsd: trader.volumeUsd * (trader.sells / Math.max(1, trader.buys + trader.sells)),
-                    firstBuyAt: trader.firstBuyTime ? new Date(trader.firstBuyTime * 1000) : null,
-                    lastTradeAt: new Date(),
-                  },
-                  update: {
-                    buyCount: trader.buys,
-                    sellCount: trader.sells,
-                    totalBoughtUsd: trader.volumeUsd * (trader.buys / Math.max(1, trader.buys + trader.sells)),
-                    totalSoldUsd: trader.volumeUsd * (trader.sells / Math.max(1, trader.buys + trader.sells)),
-                    lastTradeAt: new Date(),
-                  },
-                });
-              } catch {
-                // Holding upsert is best-effort
-              }
-
-              tradersDiscovered++;
-            } catch (err) {
-              const msg = `Trader upsert failed for ${trader.address}: ${err instanceof Error ? err.message : String(err)}`;
-              errors.push(msg);
-            }
-          }
-
-          console.log(`[AutoSync] Step 2a: ${topTraders.length} traders processed for ${token.symbol}`);
-        } catch (err) {
-          const msg = `Birdeye top traders failed for ${token.symbol}: ${err instanceof Error ? err.message : String(err)}`;
-          errors.push(msg);
+        if (totalTxCount > 0) {
+          // Update token with wallet counts from DexScreener
+          await db.token.update({
+            where: { id: token.id },
+            data: {
+              uniqueWallets24h: totalTxCount,
+            },
+          });
+          tradersDiscovered += totalTxCount;
         }
+
+        console.log(`[AutoSync] Step 2a: ${totalTxCount} traders estimated for ${token.symbol}`);
+      } catch (err) {
+        const msg = `DexScreener trader estimation failed for ${token.symbol}: ${err instanceof Error ? err.message : String(err)}`;
+        errors.push(msg);
       }
     }
   } catch (err) {
-    const msg = `Solana trader discovery failed: ${err instanceof Error ? err.message : String(err)}`;
+    const msg = `Solana trader estimation failed: ${err instanceof Error ? err.message : String(err)}`;
     errors.push(msg);
     console.error(`[AutoSync] ${msg}`);
   }
@@ -1449,7 +1256,6 @@ export async function GET() {
       isCycleRunning,
       syncIntervalMs: SYNC_INTERVAL_MS,
       apiKeysConfigured: {
-        birdeye: birdeyeClient.isConfigured(),
         etherscan: etherscanClient.hasApiKey(),
       },
     });
@@ -1498,7 +1304,6 @@ export async function POST(request: NextRequest) {
           isCycleRunning,
           syncIntervalMs: SYNC_INTERVAL_MS,
           apiKeysConfigured: {
-            birdeye: birdeyeClient.isConfigured(),
             etherscan: etherscanClient.hasApiKey(),
           },
         });
