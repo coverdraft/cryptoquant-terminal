@@ -5,7 +5,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -615,6 +614,183 @@ export default function AIStrategyOptimizer() {
   const [executionStatuses, setExecutionStatuses] = useState<ExecutionStatus[]>([]);
   const [autoEvolveRunning, setAutoEvolveRunning] = useState(false);
 
+  // Start Trading mutation (per strategy in Hall of Fame)
+  const startTradingMutation = useMutation({
+    mutationFn: async (strategy: BestStrategy) => {
+      // First ensure the strategy is activated as a trading system
+      let systemId: string | null = null;
+
+      // Check if there's already an active trading system for this strategy
+      const systemsRes = await fetch('/api/trading-systems');
+      if (systemsRes.ok) {
+        const systemsData = await systemsRes.json();
+        const existing = (systemsData.data || []).find(
+          (s: { name: string; isActive: boolean }) => s.name === `[AI] ${strategy.strategyName}` && s.isActive
+        );
+        if (existing) {
+          systemId = existing.id;
+        }
+      }
+
+      // If no active system exists, create and activate one
+      if (!systemId) {
+        const createRes = await fetch('/api/trading-systems', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: `[AI] ${strategy.strategyName}`,
+            category: strategy.category,
+            config: {
+              assetFilter: { minLiquidity: 50000, minVolume24h: 10000, maxMarketCap: 10000000, chains: ['SOL', 'ETH', 'BASE'], tokenAge: strategy.tokenAgeCategory === 'NEW' ? '<7D' : strategy.tokenAgeCategory === 'MEDIUM' ? '7-30D' : '>30D' },
+              phaseConfig: { genesis: strategy.tokenAgeCategory === 'NEW', early: true, growth: true, maturity: strategy.tokenAgeCategory === 'OLD', decline: false },
+              entrySignal: { signalType: 'SMART_MONEY_ENTRY', confidenceThreshold: 70, confirmationRequired: true, timeWindow: 15 },
+              execution: { orderType: 'LIMIT', slippageTolerance: 1.5, maxPositionSize: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5, executionDelay: 0 },
+              exitSignal: { takeProfit: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25, stopLoss: strategy.maxDrawdownPct > 0 ? Math.round(strategy.maxDrawdownPct * 0.5) : 10, trailingStop: true, trailingStopPercent: 10, timeBasedExit: 1440 },
+              riskManagement: { maxDrawdown: strategy.maxDrawdownPct || 20, maxConcurrentTrades: 3, maxDailyLoss: 5, positionSizing: 'RISK_BASED' },
+              capitalAllocation: { method: 'risk_parity', percentage: Math.round(strategy.capitalAllocation / 100), maxAllocation: 2, rebalanceFrequency: 'DAILY' },
+              bigDataContext: { whaleTracking: true, smartMoneyMirror: true, botDetection: true, onChainMetrics: true, socialSentiment: false },
+            },
+            primaryTimeframe: strategy.timeframe || '15m',
+            maxPositionPct: strategy.capitalAllocation > 0 ? Math.round(strategy.capitalAllocation * 100 / 10000) : 5,
+            stopLossPct: strategy.maxDrawdownPct > 0 ? Math.round(strategy.maxDrawdownPct * 0.5) : 10,
+            takeProfitPct: strategy.pnlPct > 0 ? Math.round(strategy.pnlPct * 0.6) : 25,
+          }),
+        });
+        if (!createRes.ok) throw new Error('Failed to create trading system');
+        const createData = await createRes.json();
+        systemId = createData.data?.id || createData.id;
+
+        // Activate in paper mode
+        const activateRes = await fetch(`/api/trading-systems/${systemId}/activate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'paper' }),
+        });
+        if (!activateRes.ok) throw new Error('Failed to activate trading system');
+      }
+
+      // Execute the trade
+      const execRes = await fetch('/api/execution/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemId,
+          direction: 'LONG',
+          positionSizeUsd: Math.min(strategy.capitalAllocation || 100, 100),
+        }),
+      });
+      if (!execRes.ok) {
+        const err = await execRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Execution failed');
+      }
+      return await execRes.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      if (result?.executed) {
+        toast.success(`🎯 Trade executed: ${result.direction} ${result.tokenSymbol} at $${result.entryPrice?.toFixed(6)}`);
+        setExecutionStatuses(prev => [...prev, {
+          type: 'success',
+          message: `Trade executed: ${result.direction} ${result.tokenSymbol} at $${result.entryPrice?.toFixed(6)}`,
+          systemId: result.systemId,
+          tradeId: result.orderId,
+        }]);
+      } else {
+        toast.info(result?.message || 'Trade request processed');
+      }
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
+      queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
+    },
+    onError: (err) => {
+      setExecutionStatuses(prev => [...prev, {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Start Trading failed',
+      }]);
+      toast.error('Failed to start trading');
+    },
+  });
+
+  // Auto-Evolution control mutation
+  const autoEvolutionControlMutation = useMutation({
+    mutationFn: async (action: 'start' | 'stop') => {
+      const res = await fetch('/api/auto-evolution', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          intervalMs: 300000, // 5 minutes
+          minSharpeRatio: 0.5,
+          minWinRate: 0.4,
+          positionSizeUsd: 100,
+          enableTrailingStop: true,
+          enableTimeBasedExit: true,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Auto-evolution ${action} failed`);
+      }
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      if (result.status === 'started') {
+        setAutoEvolveRunning(true);
+        toast.success(`🧬 Auto-evolution started: cycles every ${result.config?.intervalMs ? result.config.intervalMs / 1000 : 300}s`);
+        setExecutionStatuses(prev => [...prev, {
+          type: 'success',
+          message: 'Auto-evolution loop started — strategies will auto-trade when quality thresholds are met',
+        }]);
+      } else {
+        setAutoEvolveRunning(false);
+        toast.info('Auto-evolution loop stopped');
+        setExecutionStatuses(prev => [...prev, {
+          type: 'idle',
+          message: 'Auto-evolution loop stopped',
+        }]);
+      }
+      queryClient.invalidateQueries({ queryKey: ['auto-evolution-status'] });
+    },
+    onError: (err) => {
+      setExecutionStatuses(prev => [...prev, {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Auto-evolution control failed',
+      }]);
+      toast.error('Failed to control auto-evolution');
+    },
+  });
+
+  // Auto-Evolution status query
+  const { data: autoEvolutionStatus } = useQuery({
+    queryKey: ['auto-evolution-status'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/auto-evolution');
+        if (!res.ok) return null;
+        const json = await res.json();
+        return json.data as {
+          isRunning: boolean;
+          cycleCount: number;
+          lastCycleAt: string | null;
+          totalPaperTrades: number;
+          totalExitsProcessed: number;
+          activeStrategies: string[];
+        } | null;
+      } catch {
+        return null;
+      }
+    },
+    staleTime: 10000,
+    refetchInterval: 30000,
+  });
+
+  // Sync autoEvolveRunning with the server status
+  useEffect(() => {
+    if (autoEvolutionStatus) {
+      setAutoEvolveRunning(autoEvolutionStatus.isRunning);
+    }
+  }, [autoEvolutionStatus]);
+
   // Queries
   const { data: scanData, isLoading: scanLoading, refetch: refetchScan } = useQuery({
     queryKey: ['strategy-optimizer-scan'],
@@ -854,18 +1030,53 @@ export default function AIStrategyOptimizer() {
         body: JSON.stringify({ mode: 'paper' }),
       });
       if (!activateRes.ok) throw new Error('Failed to activate trading system');
-      return await activateRes.json();
+
+      // Step 3: Trigger actual trade execution via the autonomous execution engine
+      let executionResult = null;
+      try {
+        const execRes = await fetch('/api/execution/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemId,
+            direction: 'LONG',
+            positionSizeUsd: Math.min(strategy.capitalAllocation || 100, 100),
+          }),
+        });
+        if (execRes.ok) {
+          const execData = await execRes.json();
+          executionResult = execData.data;
+        } else {
+          console.warn('[Activate] Execution start failed, system is still activated:', await execRes.text());
+        }
+      } catch (execErr) {
+        console.warn('[Activate] Execution start error, system is still activated:', execErr);
+      }
+
+      const activateData = await activateRes.json();
+      return { ...activateData, executionResult, systemId };
     },
-    onSuccess: () => {
-      toast.success('Strategy activated in Paper Trading mode');
+    onSuccess: (data) => {
+      if (data.executionResult?.executed) {
+        toast.success(`Strategy activated & trade executed: ${data.executionResult.direction} ${data.executionResult.tokenSymbol} at $${data.executionResult.entryPrice?.toFixed(6)}`);
+        setExecutionStatuses(prev => [...prev, {
+          type: 'success',
+          message: `Activated + executed: ${data.executionResult.direction} ${data.executionResult.tokenSymbol}`,
+          systemId: data.systemId,
+          tradeId: data.executionResult.orderId,
+        }]);
+      } else {
+        toast.success('Strategy activated in Paper Trading mode (execution pending)');
+      }
       queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
     },
     onError: () => {
       toast.error('Failed to activate strategy');
     },
   });
 
-  // Activate top N strategies at once
+  // Activate top N strategies at once (with auto-execution)
   const activateAllMutation = useMutation({
     mutationFn: async ({ strategies, count }: { strategies: BestStrategy[]; count: number }) => {
       const toActivate = strategies.slice(0, count);
@@ -905,6 +1116,22 @@ export default function AIStrategyOptimizer() {
             body: JSON.stringify({ mode: 'paper' }),
           });
           if (!activateRes.ok) throw new Error(`Failed to activate ${strategy.strategyName}`);
+
+          // Step 3: Trigger trade execution
+          try {
+            await fetch('/api/execution/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                systemId,
+                direction: 'LONG',
+                positionSizeUsd: Math.min(strategy.capitalAllocation || 100, 100),
+              }),
+            });
+          } catch {
+            // Execution failure doesn't fail the activation
+          }
+
           return await activateRes.json();
         })
       );
@@ -912,8 +1139,9 @@ export default function AIStrategyOptimizer() {
       return { succeeded, total: toActivate.length };
     },
     onSuccess: ({ succeeded, total }) => {
-      toast.success(`🚀 Activated ${succeeded}/${total} strategies in Paper Trading mode!`);
+      toast.success(`🚀 Activated & executed ${succeeded}/${total} strategies!`);
       queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
     },
     onError: () => {
       toast.error('Failed to activate strategies');
@@ -1151,9 +1379,18 @@ export default function AIStrategyOptimizer() {
     queryKey: ['open-positions'],
     queryFn: async () => {
       try {
-        const res = await fetch('/api/strategy-optimizer/evolve?type=open_positions');
-        if (!res.ok) return [];
-        const json = await res.json();
+        // Try the execution positions endpoint first
+        const res = await fetch('/api/execution/positions');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data) && json.data.length > 0) {
+            return json.data as OpenPosition[];
+          }
+        }
+        // Fallback to the strategy-optimizer/evolve endpoint
+        const fallbackRes = await fetch('/api/strategy-optimizer/evolve?type=open_positions');
+        if (!fallbackRes.ok) return [];
+        const json = await fallbackRes.json();
         return (json.data || []) as OpenPosition[];
       } catch {
         return [];
@@ -1181,43 +1418,67 @@ export default function AIStrategyOptimizer() {
     let executedCount = 0;
     for (const result of topResults) {
       try {
-        // Find the backtest operations to get a token to trade
-        const btRes = await fetch(`/api/backtest/${result.backtestId}`);
-        if (!btRes.ok) continue;
-        const btData = await btRes.json();
-        const btInfo = btData.data;
+        // Use /api/execution/start which auto-selects the best token
+        const systemId = result.id || result.backtestId;
 
-        // Get token from backtest operations
-        const opsRes = await fetch(`/api/strategy-optimizer/evolve`, {
+        const execRes = await fetch('/api/execution/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'trade_history', systemId: btInfo?.systemId, limit: 5 }),
+          body: JSON.stringify({
+            systemId,
+            direction: 'LONG',
+            positionSizeUsd: Math.min(result.capitalAllocation, capital * 0.1),
+          }),
         });
 
-        let tokenAddress = '';
-        if (opsRes.ok) {
-          const opsData = await opsRes.json();
-          const ops = opsData.data || [];
-          if (ops.length > 0) {
-            tokenAddress = ops[0].tokenAddress || '';
+        if (execRes.ok) {
+          const execData = await execRes.json();
+          if (execData.data?.executed) {
+            executedCount++;
+            setExecutionStatuses(prev => [...prev, {
+              type: 'success',
+              message: `Executed: ${execData.data.direction} ${execData.data.tokenSymbol} at $${execData.data.entryPrice?.toFixed(6)}`,
+              tradeId: execData.data.orderId,
+              systemId: execData.data.systemId,
+            }]);
           }
+        } else {
+          // Fallback: try the auto-trade endpoint with a discovered token
+          const btRes = await fetch(`/api/backtest/${result.backtestId}`);
+          if (!btRes.ok) continue;
+          const btData = await btRes.json();
+          const btInfo = btData.data;
+
+          const opsRes = await fetch(`/api/strategy-optimizer/evolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'trade_history', systemId: btInfo?.systemId, limit: 5 }),
+          });
+
+          let tokenAddress = '';
+          if (opsRes.ok) {
+            const opsData = await opsRes.json();
+            const ops = opsData.data || [];
+            if (ops.length > 0) {
+              tokenAddress = ops[0].tokenAddress || '';
+            }
+          }
+
+          if (!tokenAddress) {
+            tokenAddress = '0x0000000000000000000000000000000000000001';
+          }
+
+          const fallbackSystemId = btInfo?.systemId || btInfo?.id;
+          if (!fallbackSystemId) continue;
+
+          await autoTradeMutation.mutateAsync({
+            systemId: fallbackSystemId,
+            tokenAddress,
+            direction: 'LONG',
+            positionSizeUsd: Math.min(result.capitalAllocation, capital * 0.1),
+          });
+          executedCount++;
         }
-
-        // Fallback: use a sample token address
-        if (!tokenAddress) {
-          tokenAddress = '0x0000000000000000000000000000000000000001';
-        }
-
-        const systemId = btInfo?.systemId || btInfo?.id;
-        if (!systemId) continue;
-
-        await autoTradeMutation.mutateAsync({
-          systemId,
-          tokenAddress,
-          direction: 'LONG',
-          positionSizeUsd: Math.min(result.capitalAllocation, capital * 0.1),
-        });
-        executedCount++;
       } catch {
         // Skip failed executions
       }
@@ -1394,24 +1655,32 @@ export default function AIStrategyOptimizer() {
 
     const scrollToResults = () => {
       if (!resultsRef.current) return;
-      // Try scrolling the ScrollArea viewport first (shadcn ScrollArea uses a [data-radix-scroll-area-viewport] div)
-      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
-        ?? scrollAreaRef.current?.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement | null;
-      if (viewport && resultsRef.current) {
-        const viewportRect = viewport.getBoundingClientRect();
+
+      // The scroll container is the parent div with overflow-y-auto (scrollAreaRef)
+      const scrollContainer = scrollAreaRef.current;
+      if (scrollContainer && resultsRef.current) {
+        const containerRect = scrollContainer.getBoundingClientRect();
         const resultsRect = resultsRef.current.getBoundingClientRect();
-        const scrollOffset = resultsRect.top - viewportRect.top + viewport.scrollTop;
-        viewport.scrollTo({ top: scrollOffset - 8, behavior: 'smooth' });
-      } else {
-        // Fallback to scrollIntoView
+        // Only scroll if results are not already visible in the viewport
+        if (resultsRect.top > containerRect.bottom - 40 || resultsRect.bottom < containerRect.top + 40) {
+          const scrollOffset = resultsRect.top - containerRect.top + scrollContainer.scrollTop;
+          scrollContainer.scrollTo({ top: scrollOffset - 16, behavior: 'smooth' });
+          return;
+        }
+      }
+
+      // Fallback: use scrollIntoView
+      try {
         resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch {
+        // Ignore scroll errors
       }
     };
 
-    // Use a longer timeout to ensure DOM has updated with new data
-    const timer = setTimeout(scrollToResults, 500);
+    // Use a timeout to ensure DOM has updated with new data
+    const timer = setTimeout(scrollToResults, 600);
     return () => clearTimeout(timer);
-  }, [currentStep, rankedResults.length]);
+  }, [currentStep, rankedResults.length, rankData]);
 
   return (
     <div className="flex flex-col h-full bg-[#0a0e17] border border-[#1e293b] rounded-lg overflow-hidden">
@@ -1478,8 +1747,8 @@ export default function AIStrategyOptimizer() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
+      {/* Main Content - scrollable area */}
+      <div className="flex-1 min-h-0 overflow-y-auto" ref={scrollAreaRef} style={{ scrollbarWidth: 'thin', scrollbarColor: '#2d3748 #0a0e17' }}>
         <div className="p-4 space-y-4">
           {/* ============================================= */}
           {/* VISUAL PIPELINE FLOW */}
@@ -1890,15 +2159,16 @@ export default function AIStrategyOptimizer() {
           {/* ============================================= */}
           {/* STEP 4: Results Ranking */}
           {/* ============================================= */}
-          <div ref={resultsRef} className={`bg-[#0d1117] border rounded-lg p-4 space-y-3 transition-all duration-300 ${
+          <div ref={resultsRef} className={`bg-[#0d1117] border rounded-lg transition-all duration-300 ${
             (currentStep === 'results' || currentStep === 'activate' || rankedResults.length > 0)
-              ? 'border-[#d4af37]/30 shadow-md shadow-[#d4af37]/5'
-              : 'border-[#1e293b]'
+              ? 'border-[#d4af37]/30 shadow-md shadow-[#d4af37]/5 p-4 space-y-3'
+              : 'border-[#1e293b] p-4 space-y-3'
           }`}>
+            {/* Results Header - prominent and clear */}
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <BarChart3 className="h-3.5 w-3.5 text-[#d4af37]" />
-                <span className="text-[11px] font-mono text-[#94a3b8] uppercase tracking-wider">Results Ranking</span>
+                <Trophy className="h-4 w-4 text-[#d4af37]" />
+                <span className="text-xs font-mono text-[#d4af37] uppercase tracking-wider font-bold">Results Ranking</span>
                 <Badge className="text-[8px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#64748b] border-[#2d3748]">
                   {filteredRankedResults.length} results
                 </Badge>
@@ -2063,7 +2333,7 @@ export default function AIStrategyOptimizer() {
                 </span>
               </div>
             ) : (
-              <ScrollArea style={{ maxHeight: 'min(500px, 60vh)' }}>
+              <div className="max-h-96 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#2d3748 #0a0e17' }}>
                 <table className="w-full text-[9px] font-mono">
                   <thead>
                     <tr className="text-[#475569] uppercase border-b border-[#1e293b]">
@@ -2120,7 +2390,7 @@ export default function AIStrategyOptimizer() {
                     ))}
                   </tbody>
                 </table>
-              </ScrollArea>
+              </div>
             )}
           </div>
 
@@ -2228,7 +2498,7 @@ export default function AIStrategyOptimizer() {
                   {hallOfFameCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
                 </button>
               </div>
-              {/* One-Click Activate All */}
+              {/* One-Click Activate All + Auto-Evolution Controls */}
               {bestStrategies.length > 0 && (
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1">
@@ -2252,8 +2522,32 @@ export default function AIStrategyOptimizer() {
                     ) : (
                       <Rocket className="h-3 w-3 mr-1" />
                     )}
-                    Activate Top {activateTopN}
+                    Activate & Trade Top {activateTopN}
                   </Button>
+                  <Button
+                    onClick={() => autoEvolutionControlMutation.mutate(autoEvolveRunning ? 'stop' : 'start')}
+                    disabled={autoEvolutionControlMutation.isPending}
+                    className={`h-6 px-3 text-[9px] font-mono border hover:opacity-80 ${
+                      autoEvolveRunning
+                        ? 'bg-red-600/20 text-red-400 border-red-500/30 hover:bg-red-600/30'
+                        : 'bg-purple-600/20 text-purple-400 border-purple-500/30 hover:bg-purple-600/30'
+                    }`}
+                  >
+                    {autoEvolutionControlMutation.isPending ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : autoEvolveRunning ? (
+                      <Activity className="h-3 w-3 mr-1" />
+                    ) : (
+                      <Dna className="h-3 w-3 mr-1" />
+                    )}
+                    {autoEvolveRunning ? 'Stop Auto-Evo' : 'Start Auto-Evolution'}
+                  </Button>
+                  {autoEvolutionStatus && (
+                    <Badge className="text-[7px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#94a3b8] border-[#2d3748]">
+                      {autoEvolveRunning ? `🔄 Cycles: ${autoEvolutionStatus.cycleCount}` : 'Paused'}
+                      {autoEvolutionStatus.totalPaperTrades > 0 && ` | Trades: ${autoEvolutionStatus.totalPaperTrades}`}
+                    </Badge>
+                  )}
                 </div>
               )}
             </div>
@@ -2273,7 +2567,7 @@ export default function AIStrategyOptimizer() {
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <ScrollArea style={{ maxHeight: 'min(400px, 50vh)' }}>
+                    <div className="max-h-96 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#2d3748 #0a0e17' }}>
                       <div className="space-y-2">
                         {bestStrategies.map((strat, idx) => (
                           <motion.div
@@ -2305,12 +2599,29 @@ export default function AIStrategyOptimizer() {
                                       onClick={() => activateMutation.mutate(strat)}
                                       disabled={activateMutation.isPending}
                                       className="h-6 w-6 flex items-center justify-center rounded transition-all bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 border border-emerald-500/20"
-                                      title="Activate as Trading System"
+                                      title="Activate + Execute Paper Trade"
                                     >
                                       <Rocket className="h-3 w-3" />
                                     </button>
                                   </TooltipTrigger>
-                                  <TooltipContent>Activate as Live Trading System</TooltipContent>
+                                  <TooltipContent>Activate & Execute Trade (Paper)</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => startTradingMutation.mutate(strat)}
+                                      disabled={startTradingMutation.isPending}
+                                      className="h-6 w-6 flex items-center justify-center rounded transition-all bg-cyan-600/10 text-cyan-400 hover:bg-cyan-600/20 border border-cyan-500/20"
+                                      title="Start Trading (Paper)"
+                                    >
+                                      {startTradingMutation.isPending ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Crosshair className="h-3 w-3" />
+                                      )}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Start Paper Trading</TooltipContent>
                                 </Tooltip>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -2353,14 +2664,14 @@ export default function AIStrategyOptimizer() {
                           </motion.div>
                         ))}
                       </div>
-                    </ScrollArea>
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
             )}
           </div>
         </div>
-      </ScrollArea>
+      </div>
 
     </div>
   );
