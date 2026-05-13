@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { strategyEvolutionEngine } from '@/lib/services/strategy-evolution-engine';
+import { strategyStateManager } from '@/lib/services/strategy-state-manager';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -82,6 +83,7 @@ export async function POST(request: NextRequest) {
       `dir=${direction} size=$${positionSizeUsd} price=$${resolvedPrice}`
     );
 
+    // Execute the entry via the strategy evolution engine
     const result = await strategyEvolutionEngine.executeEntry({
       systemId,
       tokenAddress,
@@ -91,6 +93,39 @@ export async function POST(request: NextRequest) {
       positionSizeUsd,
       chain: chain || 'ETH',
     });
+
+    // Record state transition to PAPER_TRADING via strategy-state-manager
+    try {
+      // Count current open positions for this system
+      const openPositionsCount = await db.backtestOperation.count({
+        where: {
+          systemId,
+          exitPrice: null,
+          backtest: { mode: 'PAPER' },
+        },
+      });
+
+      await strategyStateManager.recordStateTransition({
+        systemId,
+        newStatus: 'PAPER_TRADING',
+        triggerReason: 'SCHEDULER',
+        metrics: {
+          openPositions: openPositionsCount,
+        },
+        metadata: {
+          event: 'auto_trade_entry',
+          tradeId: result.tradeId,
+          tokenAddress,
+          tokenSymbol: resolvedSymbol,
+          direction,
+          entryPrice: resolvedPrice,
+          positionSizeUsd,
+        },
+      });
+    } catch (stateErr) {
+      // State transition recording is best-effort; don't fail the trade
+      console.warn('[AutoTrade] Failed to record state transition:', stateErr);
+    }
 
     return NextResponse.json({
       data: {

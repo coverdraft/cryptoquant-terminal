@@ -2,7 +2,7 @@
 /**
  * CryptoQuant Terminal - Real Data Seed v2
  * Fetches REAL token data from CoinGecko, DexScreener, DexPaprika
- * NO Birdeye API used anywhere.
+ * Uses only free APIs (CoinGecko, DexScreener, DexPaprika).
  */
 
 import { PrismaClient } from '@prisma/client';

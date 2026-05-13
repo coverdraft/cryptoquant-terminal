@@ -5,7 +5,7 @@
  * Computes TokenDNA for enriched tokens.
  * Generates initial signals.
  * 
- * NO Birdeye used anywhere.
+ * Uses only free APIs.
  */
 
 import { PrismaClient } from '@prisma/client';

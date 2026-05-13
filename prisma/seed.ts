@@ -2,7 +2,7 @@
  * CryptoQuant Terminal - Real Data Seed
  *
  * Fetches REAL data from CoinGecko, DexScreener, and DexPaprika.
- * NO Birdeye. NO fake data. NO fake addresses.
+ * Uses only free APIs. NO fake data. NO fake addresses.
  *
  * Phases:
  *   1. CoinGecko Top Tokens (5,000+ real tokens with prices/volumes/market caps)
@@ -1023,7 +1023,7 @@ async function main() {
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('  🌱 CryptoQuant Terminal — Real Data Seed');
   console.log('  📡 Sources: CoinGecko + DexScreener + DexPaprika');
-  console.log('  🚫 NO Birdeye · NO fake data · NO fake addresses');
+  console.log('  🚫 NO fake data · NO fake addresses');
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('');
 

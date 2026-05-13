@@ -390,7 +390,7 @@ CREATE TABLE "PriceCandle" (
     "close" REAL NOT NULL,
     "volume" REAL NOT NULL,
     "trades" INTEGER NOT NULL DEFAULT 0,
-    "source" TEXT NOT NULL DEFAULT 'birdeye',
+    "source" TEXT NOT NULL DEFAULT 'coingecko',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "PriceCandle_tokenAddress_fkey" FOREIGN KEY ("tokenAddress") REFERENCES "Token" ("address") ON DELETE RESTRICT ON UPDATE CASCADE
 );

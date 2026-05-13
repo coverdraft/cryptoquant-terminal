@@ -238,7 +238,6 @@ ETHERSCAN_API_KEY=""           # Ethereum wallet data
 DUNE_API_KEY=""                # On-chain analytics
 FOOTPRINT_API_KEY=""           # Historical data
 SQD_API_KEY=""                 # Subsquid indexer
-BIRDEYE_API_KEY=""             # Solana DEX data
 
 # Auth (optional)
 NEXTAUTH_SECRET=""             # For user authentication

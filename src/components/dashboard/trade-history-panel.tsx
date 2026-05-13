@@ -233,34 +233,50 @@ function EquityCurveChart({ trades }: { trades: TradeRecord[] }) {
           />
         )}
 
-        {/* Entry markers (green triangles pointing up) */}
+        {/* Entry markers (green triangles pointing up) with glow */}
         {chartData.map((d, i) => {
           const cx = toX(i);
           const cy = toY(d.cumulativePnl);
-          const s = 3;
+          const s = 4;
           return (
             <g key={`entry-${i}`}>
+              {/* Glow effect */}
               <polygon
                 points={`${cx},${cy - s * 1.5} ${cx - s},${cy + s * 0.5} ${cx + s},${cy + s * 0.5}`}
                 fill="#10b981"
-                opacity={hoveredIndex === i ? 1 : 0.7}
+                opacity={hoveredIndex === i ? 0.5 : 0.25}
+                filter="url(#entryGlow)"
+              />
+              {/* Solid marker */}
+              <polygon
+                points={`${cx},${cy - s * 1.5} ${cx - s},${cy + s * 0.5} ${cx + s},${cy + s * 0.5}`}
+                fill="#10b981"
+                opacity={hoveredIndex === i ? 1 : 0.85}
               />
             </g>
           );
         })}
 
-        {/* Exit markers (red triangles pointing down) */}
+        {/* Exit markers (red triangles pointing down) with glow */}
         {chartData.map((d, i) => {
           const cx = toX(i);
           // Place exit marker slightly below the entry marker
           const cy = toY(d.cumulativePnl) + 8;
-          const s = 3;
+          const s = 4;
           return (
             <g key={`exit-${i}`}>
+              {/* Glow effect */}
               <polygon
                 points={`${cx},${cy + s * 1.5} ${cx - s},${cy - s * 0.5} ${cx + s},${cy - s * 0.5}`}
                 fill="#ef4444"
-                opacity={hoveredIndex === i ? 1 : 0.7}
+                opacity={hoveredIndex === i ? 0.5 : 0.25}
+                filter="url(#exitGlow)"
+              />
+              {/* Solid marker */}
+              <polygon
+                points={`${cx},${cy + s * 1.5} ${cx - s},${cy - s * 0.5} ${cx + s},${cy - s * 0.5}`}
+                fill="#ef4444"
+                opacity={hoveredIndex === i ? 1 : 0.85}
               />
             </g>
           );
@@ -279,6 +295,25 @@ function EquityCurveChart({ trades }: { trades: TradeRecord[] }) {
             <stop offset="0%" stopColor={chartData[chartData.length - 1].cumulativePnl >= 0 ? '#10b981' : '#ef4444'} stopOpacity="0.4" />
             <stop offset="100%" stopColor={chartData[chartData.length - 1].cumulativePnl >= 0 ? '#10b981' : '#ef4444'} stopOpacity="0" />
           </linearGradient>
+          {/* Glow filters for markers */}
+          <filter id="entryGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feFlood floodColor="#10b981" floodOpacity="0.6" result="color" />
+            <feComposite in="color" in2="blur" operator="in" result="glow" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <filter id="exitGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feFlood floodColor="#ef4444" floodOpacity="0.6" result="color" />
+            <feComposite in="color" in2="blur" operator="in" result="glow" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* Invisible hit areas for hover */}
@@ -905,6 +940,7 @@ function TradeDetailModal({
 export default function TradeHistoryPanel() {
   const [filterMode, setFilterMode] = useState<string>('ALL');
   const [filterDirection, setFilterDirection] = useState<string>('ALL');
+  const [filterStrategy, setFilterStrategy] = useState<string>('ALL');
   const [tab, setTab] = useState<'history' | 'positions'>('history');
   const [selectedTrade, setSelectedTrade] = useState<TradeRecord | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -942,14 +978,21 @@ export default function TradeHistoryPanel() {
   const trades = tradeHistory || [];
   const positions = openPositions || [];
 
+  // Unique strategy names for filter
+  const strategyNames = useMemo(
+    () => Array.from(new Set(trades.map(t => t.systemName))).sort(),
+    [trades],
+  );
+
   // Filter trades
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
       if (filterMode !== 'ALL' && t.mode !== filterMode) return false;
       if (filterDirection !== 'ALL' && t.direction !== filterDirection) return false;
+      if (filterStrategy !== 'ALL' && t.systemName !== filterStrategy) return false;
       return true;
     });
-  }, [trades, filterMode, filterDirection]);
+  }, [trades, filterMode, filterDirection, filterStrategy]);
 
   const handleRefresh = () => {
     refetchHistory();
@@ -1024,7 +1067,7 @@ export default function TradeHistoryPanel() {
                 )}
 
                 {/* Filters */}
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center gap-1">
                     <span className="text-[8px] font-mono text-[#475569]">Mode:</span>
                     <Select value={filterMode} onValueChange={setFilterMode}>
@@ -1051,6 +1094,24 @@ export default function TradeHistoryPanel() {
                       </SelectContent>
                     </Select>
                   </div>
+                  {strategyNames.length > 1 && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[8px] font-mono text-[#475569]">Strategy:</span>
+                      <Select value={filterStrategy} onValueChange={setFilterStrategy}>
+                        <SelectTrigger className="h-5 w-28 text-[9px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#94a3b8]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                          <SelectItem value="ALL" className="text-[9px] font-mono">All Strategies</SelectItem>
+                          {strategyNames.map(name => (
+                            <SelectItem key={name} value={name} className="text-[9px] font-mono truncate max-w-[200px]">
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
 
                 {/* Trade List */}
@@ -1140,6 +1201,69 @@ export default function TradeHistoryPanel() {
               </motion.div>
             ) : (
               <motion.div key="positions" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                {/* Live Positions Monitor */}
+                {positions.length > 0 && (
+                  <div className="bg-[#0d1117] border border-[#d4af37]/20 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Activity className="h-3.5 w-3.5 text-[#d4af37]" />
+                      <span className="text-[10px] font-mono text-[#d4af37] uppercase tracking-wider font-bold">Live Positions Monitor</span>
+                      <span className="relative flex h-2 w-2 ml-1">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#d4af37]/50 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-[#d4af37]" />
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3">
+                      {/* Total Unrealized PnL */}
+                      <div className="bg-[#0a0e17] border border-[#1e293b] rounded-md p-2.5">
+                        <span className="text-[8px] font-mono text-[#64748b] uppercase block mb-1">Total Unrealized PnL</span>
+                        {(() => {
+                          const totalUnrealized = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+                          return (
+                            <span className={`text-[12px] font-mono font-bold ${totalUnrealized >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {formatPnl(totalUnrealized)}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      {/* Average Hold Time */}
+                      <div className="bg-[#0a0e17] border border-[#1e293b] rounded-md p-2.5">
+                        <span className="text-[8px] font-mono text-[#64748b] uppercase block mb-1">Avg Hold Time</span>
+                        {(() => {
+                          const now = Date.now();
+                          const avgMs = positions.reduce((sum, p) => sum + (now - new Date(p.entryTime).getTime()), 0) / Math.max(positions.length, 1);
+                          const avgMin = avgMs / 60000;
+                          return (
+                            <span className="text-[12px] font-mono font-bold text-[#e2e8f0]">
+                              {formatDuration(avgMin)}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      {/* Direction Distribution */}
+                      <div className="bg-[#0a0e17] border border-[#1e293b] rounded-md p-2.5">
+                        <span className="text-[8px] font-mono text-[#64748b] uppercase block mb-1">Direction</span>
+                        <div className="flex items-center gap-2">
+                          {(() => {
+                            const longCount = positions.filter(p => p.direction === 'LONG').length;
+                            const shortCount = positions.filter(p => p.direction === 'SHORT').length;
+                            return (
+                              <>
+                                <span className="text-[10px] font-mono font-bold text-emerald-400">
+                                  {longCount} LONG
+                                </span>
+                                <span className="text-[8px] font-mono text-[#475569]">|</span>
+                                <span className="text-[10px] font-mono font-bold text-red-400">
+                                  {shortCount} SHORT
+                                </span>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {positions.length === 0 ? (
                   <div className="flex flex-col items-center py-12 text-[#64748b]">
                     <Target className="h-10 w-10 mb-3 text-[#2d3748]" />

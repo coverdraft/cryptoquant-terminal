@@ -609,6 +609,7 @@ export default function AIStrategyOptimizer() {
 
   // Refs for auto-scrolling to results
   const resultsRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   // Execution state
   const [executionStatuses, setExecutionStatuses] = useState<ExecutionStatus[]>([]);
@@ -1386,14 +1387,31 @@ export default function AIStrategyOptimizer() {
   // Selected count
   const selectedCount = selectedStrategyIds.size;
 
-  // Auto-scroll to results when backtesting completes
+  // Auto-scroll to results when backtesting completes or results data loads
   useEffect(() => {
-    if (currentStep === 'results' && resultsRef.current) {
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 300);
-    }
-  }, [currentStep]);
+    const shouldScroll = (currentStep === 'results' || currentStep === 'activate') && rankedResults.length > 0;
+    if (!shouldScroll) return;
+
+    const scrollToResults = () => {
+      if (!resultsRef.current) return;
+      // Try scrolling the ScrollArea viewport first (shadcn ScrollArea uses a [data-radix-scroll-area-viewport] div)
+      const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null
+        ?? scrollAreaRef.current?.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement | null;
+      if (viewport && resultsRef.current) {
+        const viewportRect = viewport.getBoundingClientRect();
+        const resultsRect = resultsRef.current.getBoundingClientRect();
+        const scrollOffset = resultsRect.top - viewportRect.top + viewport.scrollTop;
+        viewport.scrollTo({ top: scrollOffset - 8, behavior: 'smooth' });
+      } else {
+        // Fallback to scrollIntoView
+        resultsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    // Use a longer timeout to ensure DOM has updated with new data
+    const timer = setTimeout(scrollToResults, 500);
+    return () => clearTimeout(timer);
+  }, [currentStep, rankedResults.length]);
 
   return (
     <div className="flex flex-col h-full bg-[#0a0e17] border border-[#1e293b] rounded-lg overflow-hidden">
@@ -1461,7 +1479,7 @@ export default function AIStrategyOptimizer() {
       </div>
 
       {/* Main Content */}
-      <ScrollArea className="flex-1 min-h-0">
+      <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
         <div className="p-4 space-y-4">
           {/* ============================================= */}
           {/* VISUAL PIPELINE FLOW */}
@@ -1872,7 +1890,11 @@ export default function AIStrategyOptimizer() {
           {/* ============================================= */}
           {/* STEP 4: Results Ranking */}
           {/* ============================================= */}
-          <div ref={resultsRef} className="bg-[#0d1117] border border-[#1e293b] rounded-lg p-4 space-y-3">
+          <div ref={resultsRef} className={`bg-[#0d1117] border rounded-lg p-4 space-y-3 transition-all duration-300 ${
+            (currentStep === 'results' || currentStep === 'activate' || rankedResults.length > 0)
+              ? 'border-[#d4af37]/30 shadow-md shadow-[#d4af37]/5'
+              : 'border-[#1e293b]'
+          }`}>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-3.5 w-3.5 text-[#d4af37]" />

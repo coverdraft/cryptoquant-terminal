@@ -4,7 +4,7 @@
  * 
  * Fetches REAL token data from CoinGecko + DexScreener + DexPaprika.
  * Runs directly with Node.js (no Next.js API needed).
- * NO Birdeye — only free APIs.
+ * Only free APIs.
  * 
  * Usage: node scripts/real-seed.mjs [--quick | --full | --tokens 5000]
  */
@@ -740,7 +740,7 @@ async function main() {
 
   console.log('╔══════════════════════════════════════════════════════════╗');
   console.log('║     🧠 CryptoQuant Terminal — Real Data Seed            ║');
-  console.log('║     CoinGecko + DexScreener + DexPaprika (NO Birdeye)  ║');
+  console.log('║     CoinGecko + DexScreener + DexPaprika               ║');
   console.log('╚══════════════════════════════════════════════════════════╝');
   console.log(`\nMode: ${isQuick ? 'QUICK' : 'FULL'} | Target: ${targetTokens} tokens`);
 

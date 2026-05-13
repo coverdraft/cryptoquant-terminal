@@ -289,7 +289,7 @@ function chapter1() {
     heading3('Zona 2 — Backtesting Engine'),
     para('La capa superior. Motor de backtesting con 3 modos de operacion (Historico, Paper, Forward), 16 metodos de asignacion de capital, optimizacion de parametros, y proteccion contra overfitting. Los resultados retroalimentan la base de datos para mejorar iterativamente las estrategias.'),
     heading2('Flujo de Datos'),
-    para('El flujo de informacion sigue un patrón unidireccional con retroalimentacion: Los datos on-chain son ingeridos desde multiples fuentes (DexScreener, Birdeye, Jupiter, Solana RPC, Ethereum RPC) y procesados por el Big Data Engine, que genera contexto de mercado. Este contexto alimenta al Trading Systems Lab, que produce senales de trading. Estas senales son validadas por el Backtesting Engine, cuyos resultados mejoran la base de conocimiento del sistema, cerrando el ciclo de aprendizaje.'),
+    para('El flujo de informacion sigue un patrón unidireccional con retroalimentacion: Los datos on-chain son ingeridos desde multiples fuentes (DexScreener, DexPaprika, CoinGecko, Solana RPC, Etherscan) y procesados por el Big Data Engine, que genera contexto de mercado. Este contexto alimenta al Trading Systems Lab, que produce senales de trading. Estas senales son validadas por el Backtesting Engine, cuyos resultados mejoran la base de conocimiento del sistema, cerrando el ciclo de aprendizaje.'),
     para('La plataforma esta construida sobre Next.js 16 con TypeScript, utilizando Prisma ORM con SQLite para persistencia y ClickHouse para analisis de big data, proporcionando una combinacion de velocidad de desarrollo y capacidad de procesamiento analitico a gran escala.'),
   ];
 }
@@ -894,8 +894,8 @@ function chapter13() {
     para('El pipeline de ingestion de datos es el componente que conecta CryptoQuant Terminal con las fuentes de datos on-chain y off-chain. Implementa clientes para 5 fuentes principales de datos, cada uno optimizado para un tipo especifico de informacion.'),
     heading2('DexScreener'),
     para('API multi-chain que proporciona datos de pares en DEXes. Incluye precios, volumenes, liquidez, market cap, y metadata de pares. Funcionalidades: busqueda de tokens por nombre/simbolo, obtencion de datos por chain y direccion, tokens trending, pares por DEX, y tokens boosted. Cobertura: Solana, Ethereum, Base, Arbitrum, BSC, y mas.'),
-    heading2('Birdeye'),
-    para('API de datos de mercado que proporciona feeds de precios, datos OHLCV, listas de tokens, historial de transacciones de wallet, y nuevos listados. Soporta multiples timeframes OHLCV (1m, 3m, 5m, 15m, 30m, 1H, 4H, 1D). Ideal para construir series temporales de precios y analizar patrones historicos.'),
+    heading2('DexPaprika'),
+    para('API de datos de mercado que proporciona feeds de precios, datos OHLCV, listas de tokens, historial de swaps por wallet, y búsqueda multi-cadena. Soporta multiples timeframes OHLCV. Ideal para construir series temporales de precios y analizar patrones historicos.'),
     heading2('Jupiter'),
     para('Agregador de swaps en Solana. Proporciona cotizaciones de swap en tiempo real y lista de tokens verificados. Utilizado para: estimar slippage real en ejecuciones, obtener rutas de swap optimas, y acceder a la lista de tokens estrictamente verificados de Jupiter.'),
     heading2('Solana RPC'),
@@ -903,7 +903,7 @@ function chapter13() {
     heading2('Ethereum RPC'),
     para('Conexion directa a nodos Ethereum. Metodos: eth_getTransactionCount, eth_getTransactionByHash, eth_getTransactionReceipt, eth_getBlockNumber, eth_getLogs. Complementado con Etherscan API para historial completo de transacciones. Utilizado para tracking cross-chain y analisis de wallets Ethereum.'),
     heading2('Orquestador del Pipeline'),
-    para('La clase DataIngestionPipeline orquesta todos los clientes y proporciona metodos de alto nivel: syncTokenData (sincroniza tokens desde DexScreener + Birdeye), getWalletHistory (historial cross-chain), searchTokens (busqueda multi-fuente), y getNewListings (nuevos listados). El pipeline maneja rate limits, reintentos, y normalizacion de datos automaticamente.'),
+    para('La clase DataIngestionPipeline orquesta todos los clientes y proporciona metodos de alto nivel: syncTokenData (sincroniza tokens desde DexScreener + DexPaprika), getWalletHistory (historial cross-chain), searchTokens (busqueda multi-fuente), y getNewListings (nuevos listados). El pipeline maneja rate limits, reintentos, y normalizacion de datos automaticamente.'),
   ];
 }
 
@@ -1007,7 +1007,7 @@ function chapter16() {
     heading3('Infraestructura Base'),
     bulletPoint('Aplicacion Next.js 16 con TypeScript y Tailwind CSS 4'),
     bulletPoint('Prisma ORM con SQLite + 15 modelos de datos completos'),
-    bulletPoint('5 clientes de datos: DexScreener, Birdeye, Jupiter, Solana RPC, Ethereum RPC'),
+    bulletPoint('5 clientes de datos: DexScreener, DexPaprika, CoinGecko, Solana RPC, Etherscan'),
     bulletPoint('26 endpoints API REST funcionales'),
     bulletPoint('Dashboard con visualizacion en tiempo real'),
     heading3('Motores de Analisis'),

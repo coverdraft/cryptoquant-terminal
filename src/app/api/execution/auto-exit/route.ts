@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { strategyEvolutionEngine } from '@/lib/services/strategy-evolution-engine';
+import { strategyStateManager } from '@/lib/services/strategy-state-manager';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -33,15 +34,18 @@ export async function POST(request: NextRequest) {
 
     // Resolve exit price from the open position's token if not provided
     let resolvedExitPrice = exitPrice || 0;
+    let systemId: string | null = null;
 
-    if (resolvedExitPrice === 0) {
-      // Find the open operation to get the token address
-      const operation = await db.backtestOperation.findFirst({
-        where: { backtestId, exitPrice: null },
-        orderBy: { entryTime: 'desc' },
-      });
+    // Find the open operation to get the token address and systemId
+    const operation = await db.backtestOperation.findFirst({
+      where: { backtestId, exitPrice: null },
+      orderBy: { entryTime: 'desc' },
+    });
 
-      if (operation) {
+    if (operation) {
+      systemId = operation.systemId;
+
+      if (resolvedExitPrice === 0) {
         const token = await db.token.findFirst({
           where: { address: operation.tokenAddress },
           select: { priceUsd: true, symbol: true },
@@ -67,11 +71,51 @@ export async function POST(request: NextRequest) {
       `[AutoExit] Executing exit: backtest=${backtestId} price=$${resolvedExitPrice} reason=${reason}`
     );
 
+    // Execute the exit via the strategy evolution engine
     const result = await strategyEvolutionEngine.executeExit({
       backtestId,
       exitPrice: resolvedExitPrice,
       exitReason: reason,
     });
+
+    // Record state transition via strategy-state-manager
+    if (systemId) {
+      try {
+        // Count remaining open positions for this system
+        const remainingOpenPositions = await db.backtestOperation.count({
+          where: {
+            systemId,
+            exitPrice: null,
+            backtest: { mode: 'PAPER' },
+          },
+        });
+
+        // If no more open positions, transition back to IDLE; otherwise stay in PAPER_TRADING
+        const newStatus = remainingOpenPositions === 0 ? 'IDLE' : 'PAPER_TRADING';
+
+        await strategyStateManager.recordStateTransition({
+          systemId,
+          newStatus,
+          triggerReason: 'SCHEDULER',
+          metrics: {
+            totalPnlUsd: result.pnlUsd,
+            totalPnlPct: result.pnlPct,
+            openPositions: remainingOpenPositions,
+          },
+          metadata: {
+            event: 'auto_exit_executed',
+            backtestId,
+            exitReason: reason,
+            exitPrice: resolvedExitPrice,
+            pnlUsd: result.pnlUsd,
+            pnlPct: result.pnlPct,
+          },
+        });
+      } catch (stateErr) {
+        // State transition recording is best-effort; don't fail the exit
+        console.warn('[AutoExit] Failed to record state transition:', stateErr);
+      }
+    }
 
     return NextResponse.json({
       data: {

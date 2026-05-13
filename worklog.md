@@ -34,7 +34,7 @@ Work Log:
 
 Stage Summary:
 - Real data from CoinGecko + DexScreener seeded
-- NO Birdeye API used anywhere
+- Uses only free APIs (CoinGecko, DexScreener, DexPaprika)
 - 7 trading systems in DB
 - Scheduler and capital state initialized
 
@@ -87,7 +87,7 @@ Work Log:
 
 Stage Summary:
 - Smart Money tracker fully functional using DexPaprika
-- No Birdeye dependency
+- No external paid API dependency
 
 ---
 Task ID: 6

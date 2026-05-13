@@ -1,9 +1,24 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -22,8 +37,11 @@ import {
   History,
   ChevronDown,
   ChevronUp,
+  MoreVertical,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 // ============================================================
 // TYPES
@@ -306,20 +324,117 @@ function StateLegend() {
 // STRATEGY CARD COMPONENT
 // ============================================================
 
+// ============================================================
+// LIVE PNL COUNTER COMPONENT
+// ============================================================
+
+function LivePnlCounter({ pnlUsd, pnlPct }: { pnlUsd: number; pnlPct: number }) {
+  const isPositive = pnlUsd >= 0;
+  const displayRef = useRef<HTMLSpanElement>(null);
+  const prevPnlRef = useRef(pnlUsd);
+
+  useEffect(() => {
+    prevPnlRef.current = pnlUsd;
+  }, [pnlUsd]);
+
+  useEffect(() => {
+    const startValue = prevPnlRef.current;
+    const endValue = pnlUsd;
+    const diff = endValue - startValue;
+    if (Math.abs(diff) < 0.01 || !displayRef.current) {
+      if (displayRef.current) {
+        displayRef.current.textContent = `${endValue >= 0 ? '+' : ''}${endValue.toFixed(2)}$`;
+      }
+      return;
+    }
+    const duration = 600;
+    const startTime = Date.now();
+    let rafId: number;
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = startValue + diff * eased;
+      if (displayRef.current) {
+        displayRef.current.textContent = `${current >= 0 ? '+' : ''}${current.toFixed(2)}$`;
+      }
+      if (progress < 1) {
+        rafId = requestAnimationFrame(animate);
+      }
+    };
+    rafId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId);
+  }, [pnlUsd]);
+
+  return (
+    <div className={`flex items-center gap-2 px-2 py-1 rounded-md ${
+      isPositive ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'
+    }`} style={{
+      boxShadow: isPositive
+        ? '0 0 12px rgba(16, 185, 129, 0.15), 0 0 4px rgba(16, 185, 129, 0.1)'
+        : '0 0 12px rgba(239, 68, 68, 0.15), 0 0 4px rgba(239, 68, 68, 0.1)',
+    }}>
+      {isPositive ? (
+        <TrendingUp className="h-3 w-3 text-emerald-400" />
+      ) : (
+        <TrendingDown className="h-3 w-3 text-red-400" />
+      )}
+      <span
+        ref={displayRef}
+        className={`text-[11px] font-mono font-bold ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}
+      >
+        {pnlUsd >= 0 ? '+' : ''}{pnlUsd.toFixed(2)}$
+      </span>
+      <span className={`text-[9px] font-mono ${isPositive ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+        ({pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(1)}%)
+      </span>
+    </div>
+  );
+}
+
+// ============================================================
+// STRATEGY CARD COMPONENT
+// ============================================================
+
 function StrategyCard({
   strategy,
   isExpanded,
   onToggle,
+  onStateChange,
 }: {
   strategy: StrategyWithState;
   isExpanded: boolean;
   onToggle: () => void;
+  onStateChange: (id: string, newStatus: StrategyStatus) => void;
 }) {
   const status = strategy.currentState?.status || 'IDLE';
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.IDLE;
   const StatusIcon = config.icon;
   const catColor = getCategoryColor(strategy.category);
   const isLive = status === 'LIVE' || status === 'PAPER_TRADING';
+  const [forceStatus, setForceStatus] = useState<string>('');
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const handlePause = async () => {
+    setActionLoading(true);
+    onStateChange(strategy.id, 'PAUSED');
+    setTimeout(() => setActionLoading(false), 500);
+  };
+
+  const handleResume = async () => {
+    setActionLoading(true);
+    onStateChange(strategy.id, 'IDLE');
+    setTimeout(() => setActionLoading(false), 500);
+  };
+
+  const handleForceTransition = () => {
+    if (forceStatus && forceStatus !== status) {
+      setActionLoading(true);
+      onStateChange(strategy.id, forceStatus as StrategyStatus);
+      setForceStatus('');
+      setTimeout(() => setActionLoading(false), 500);
+    }
+  };
 
   return (
     <motion.div
@@ -347,8 +462,79 @@ function StrategyCard({
             )}
             <StatusIcon className={`h-3 w-3 ${config.color}`} />
             <span className={`text-[8px] font-mono ${config.color}`}>{config.label}</span>
+
+            {/* Quick Actions Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="ml-1 p-0.5 rounded hover:bg-[#1e293b] transition-colors"
+                  disabled={actionLoading}
+                >
+                  <MoreVertical className="h-3 w-3 text-[#64748b]" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="bg-[#1a1f2e] border-[#2d3748] w-48" align="end">
+                <DropdownMenuLabel className="text-[8px] font-mono text-[#64748b] uppercase">
+                  Quick Actions
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-[#2d3748]" />
+                {status !== 'PAUSED' && status !== 'IDLE' && (
+                  <DropdownMenuItem
+                    className="text-[9px] font-mono text-orange-400 focus:bg-[#2d3748] focus:text-orange-400 cursor-pointer"
+                    onClick={handlePause}
+                  >
+                    <Pause className="h-3 w-3 mr-2" />
+                    Pause Strategy
+                  </DropdownMenuItem>
+                )}
+                {status === 'PAUSED' && (
+                  <DropdownMenuItem
+                    className="text-[9px] font-mono text-emerald-400 focus:bg-[#2d3748] focus:text-emerald-400 cursor-pointer"
+                    onClick={handleResume}
+                  >
+                    <Play className="h-3 w-3 mr-2" />
+                    Resume Strategy
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator className="bg-[#2d3748]" />
+                <DropdownMenuLabel className="text-[8px] font-mono text-[#64748b] uppercase">
+                  Force Transition
+                </DropdownMenuLabel>
+                <div className="px-2 py-1.5 flex items-center gap-1">
+                  <Select value={forceStatus} onValueChange={(val) => setForceStatus(val)}>
+                    <SelectTrigger className="h-5 text-[8px] font-mono bg-[#0a0e17] border-[#1e293b] text-[#94a3b8] flex-1">
+                      <SelectValue placeholder="Select state..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1a1f2e] border-[#2d3748]">
+                      {(['IDLE', 'BACKTESTING', 'PAPER_TRADING', 'LIVE', 'PAUSED', 'ERROR'] as StrategyStatus[]).map((s) => (
+                        <SelectItem key={s} value={s} className="text-[8px] font-mono">
+                          {STATUS_CONFIG[s]?.label || s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    onClick={handleForceTransition}
+                    disabled={!forceStatus || forceStatus === status}
+                    className="h-5 px-1.5 rounded text-[7px] font-mono bg-[#d4af37]/20 text-[#d4af37] hover:bg-[#d4af37]/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    GO
+                  </button>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
+
+        {/* Real-time PnL Counter for active strategies */}
+        {isLive && strategy.currentState && (
+          <div className="mb-2">
+            <LivePnlCounter
+              pnlUsd={strategy.currentState.totalPnlUsd}
+              pnlPct={strategy.currentState.totalPnlPct}
+            />
+          </div>
+        )}
 
         {/* Category & Version badges */}
         <div className="flex items-center gap-1.5 mb-2">
@@ -507,6 +693,110 @@ function StrategyCard({
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// ============================================================
+// STATE FLOW DIAGRAM COMPONENT
+// ============================================================
+
+function StateFlowDiagram({ statistics }: { statistics: StateStatistics | null }) {
+  // Define the main progression flow
+  const flowStates = ['IDLE', 'BACKTESTING', 'PAPER_TRADING', 'LIVE'] as const;
+
+  // Count transitions between adjacent states in the flow
+  const transitionCounts: Record<string, number> = {};
+  if (statistics?.transitionCounts) {
+    // Parse transition counts like "IDLE->BACKTESTING": 5
+    for (const [key, count] of Object.entries(statistics.transitionCounts)) {
+      transitionCounts[key] = count;
+    }
+  }
+
+  return (
+    <div className="bg-[#0d1117] rounded-lg border border-[#1e293b] p-3">
+      <div className="flex items-center gap-2 mb-3">
+        <ArrowRight className="h-3.5 w-3.5 text-[#d4af37]" />
+        <span className="text-[10px] font-mono text-[#d4af37] uppercase tracking-wider font-bold">State Flow Diagram</span>
+        <span className="text-[8px] font-mono text-[#475569]">Most common transitions</span>
+      </div>
+
+      <div className="flex items-center justify-between gap-1 overflow-x-auto">
+        {flowStates.map((state, idx) => {
+          const config = STATUS_CONFIG[state];
+          const count = statistics?.statusCounts?.[state] || 0;
+          const transitionKey = idx < flowStates.length - 1
+            ? `${flowStates[idx]}->${flowStates[idx + 1]}`
+            : null;
+          const transitionCount = transitionKey ? (transitionCounts[transitionKey] || 0) : 0;
+
+          return (
+            <div key={state} className="flex items-center gap-1 shrink-0">
+              {/* State node */}
+              <div className={`flex flex-col items-center gap-1 px-2.5 py-2 rounded-lg border ${config.borderColor} ${config.bgColor} min-w-[64px]`}>
+                <div className="flex items-center gap-1">
+                  {(() => {
+                    const Icon = config.icon;
+                    return <Icon className={`h-3 w-3 ${config.color}`} />;
+                  })()}
+                  <span className={`text-[8px] font-mono font-bold ${config.color}`}>{config.label}</span>
+                </div>
+                <span className="text-[7px] font-mono text-[#64748b]">{count} strategies</span>
+              </div>
+
+              {/* Arrow with count */}
+              {idx < flowStates.length - 1 && (
+                <div className="flex flex-col items-center gap-0.5 mx-1">
+                  <span className="text-[7px] font-mono text-[#d4af37] font-bold">
+                    {transitionCount > 0 ? transitionCount : '—'}
+                  </span>
+                  <svg width="24" height="12" viewBox="0 0 24 12">
+                    <line x1="0" y1="6" x2="18" y2="6" stroke={transitionCount > 0 ? '#d4af37' : '#2d3748'} strokeWidth="1.5" />
+                    <polygon points="24,6 18,2 18,10" fill={transitionCount > 0 ? '#d4af37' : '#2d3748'} />
+                  </svg>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Additional common transitions below */}
+      {(() => {
+        const extraTransitions = Object.entries(transitionCounts)
+          .filter(([key]) => {
+            // Filter out the main flow transitions already shown above
+            const mainFlowKeys = flowStates.slice(0, -1).map((s, i) => `${s}->${flowStates[i + 1]}`);
+            return !mainFlowKeys.includes(key);
+          })
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 4);
+
+        if (extraTransitions.length === 0) return null;
+        return (
+          <div className="mt-3 pt-2 border-t border-[#1e293b]">
+            <span className="text-[8px] font-mono text-[#475569] uppercase block mb-1.5">Other Transitions</span>
+            <div className="flex flex-wrap gap-3">
+              {extraTransitions.map(([key, count]) => {
+                const [from, to] = key.split('->');
+                const fromConfig = STATUS_CONFIG[from] || STATUS_CONFIG.IDLE;
+                const toConfig = STATUS_CONFIG[to] || STATUS_CONFIG.IDLE;
+                return (
+                  <div key={key} className="flex items-center gap-1">
+                    <span className={`text-[8px] font-mono ${fromConfig.color}`}>{fromConfig.label}</span>
+                    <ArrowRight className="h-2.5 w-2.5 text-[#475569]" />
+                    <span className={`text-[8px] font-mono ${toConfig.color}`}>{toConfig.label}</span>
+                    <Badge className="text-[7px] h-3 px-1 font-mono bg-[#d4af37]/10 text-[#d4af37] border-0 ml-0.5">
+                      {count}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
   );
 }
 
@@ -689,6 +979,7 @@ export default function StrategyStateTracker() {
   const [statusFilter, setStatusFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
+  const queryClient = useQueryClient();
 
   // Fetch strategy states with real-time polling
   const {
@@ -718,6 +1009,29 @@ export default function StrategyStateTracker() {
     staleTime: 10000,
     refetchInterval: 10000, // Poll every 10s for real-time updates
   });
+
+  // Mutation for updating strategy state
+  const stateMutation = useMutation({
+    mutationFn: async ({ id, newStatus }: { id: string; newStatus: StrategyStatus }) => {
+      const res = await fetch(`/api/strategy-states/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: newStatus,
+          triggerReason: 'MANUAL',
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to update strategy state');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['strategy-states'] });
+    },
+  });
+
+  const handleStateChange = useCallback((id: string, newStatus: StrategyStatus) => {
+    stateMutation.mutate({ id, newStatus });
+  }, [stateMutation]);
 
   const strategies = response?.data || [];
   const statistics = response?.statistics || null;
@@ -844,6 +1158,7 @@ export default function StrategyStateTracker() {
                             strategy={s}
                             isExpanded={expandedId === s.id}
                             onToggle={() => toggleExpand(s.id)}
+                            onStateChange={handleStateChange}
                           />
                         ))}
                       </div>
@@ -864,6 +1179,7 @@ export default function StrategyStateTracker() {
                             strategy={s}
                             isExpanded={expandedId === s.id}
                             onToggle={() => toggleExpand(s.id)}
+                            onStateChange={handleStateChange}
                           />
                         ))}
                       </div>
@@ -884,6 +1200,7 @@ export default function StrategyStateTracker() {
                             strategy={s}
                             isExpanded={expandedId === s.id}
                             onToggle={() => toggleExpand(s.id)}
+                            onStateChange={handleStateChange}
                           />
                         ))}
                       </div>
@@ -904,6 +1221,7 @@ export default function StrategyStateTracker() {
                             strategy={s}
                             isExpanded={expandedId === s.id}
                             onToggle={() => toggleExpand(s.id)}
+                            onStateChange={handleStateChange}
                           />
                         ))}
                       </div>
@@ -924,6 +1242,7 @@ export default function StrategyStateTracker() {
                             strategy={s}
                             isExpanded={expandedId === s.id}
                             onToggle={() => toggleExpand(s.id)}
+                            onStateChange={handleStateChange}
                           />
                         ))}
                         {idleStrategies.length > 8 && (
@@ -964,6 +1283,7 @@ export default function StrategyStateTracker() {
                       strategy={s}
                       isExpanded={expandedId === s.id}
                       onToggle={() => toggleExpand(s.id)}
+                      onStateChange={handleStateChange}
                     />
                   ))}
                 </div>
@@ -975,7 +1295,10 @@ export default function StrategyStateTracker() {
         {/* STATS TAB */}
         <TabsContent value="stats" className="flex-1 min-h-0 mt-0 px-0">
           <ScrollArea className="h-full">
-            <div className="p-3">
+            <div className="p-3 space-y-3">
+              {/* State Flow Diagram at top */}
+              <StateFlowDiagram statistics={statistics} />
+
               {statistics ? (
                 <StatisticsPanel statistics={statistics} />
               ) : (
