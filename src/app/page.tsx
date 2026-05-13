@@ -95,7 +95,7 @@ function StrategyLabContent() {
         <TabsContent value="classic" className="flex-1 min-h-0 mt-0">
           <TradingSystemsLab />
         </TabsContent>
-        <TabsContent value="ai-optimizer" className="flex-1 min-h-0 mt-0 overflow-y-auto">
+        <TabsContent value="ai-optimizer" className="flex-1 min-h-0 mt-0">
           <AIStrategyOptimizer />
         </TabsContent>
         <TabsContent value="trade-history" className="flex-1 min-h-0 mt-0">

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { strategyEvolutionEngine, DEFAULT_EVOLUTION_CONFIG, type EvolutionConfig } from '@/lib/services/strategy-evolution-engine';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,90 @@ export async function POST(request: NextRequest) {
         data: {
           ...result,
           message: `Evolution complete: ${result.improved} improved, ${result.degraded} degraded out of ${result.totalMutations} mutations across ${result.iterations} iterations`,
+        },
+      });
+    }
+
+    if (action === 'auto_evolve') {
+      // Auto-evolve: Run evolution loop + auto-activate the best evolved strategy
+      const config: EvolutionConfig = {
+        maxIterations: Number(body.maxIterations) || DEFAULT_EVOLUTION_CONFIG.maxIterations,
+        improvementThreshold: Number(body.improvementThreshold) || DEFAULT_EVOLUTION_CONFIG.improvementThreshold,
+        mutationRate: Number(body.mutationRate) || DEFAULT_EVOLUTION_CONFIG.mutationRate,
+        topN: Number(body.topN) || DEFAULT_EVOLUTION_CONFIG.topN,
+        capital: Number(body.capital) || DEFAULT_EVOLUTION_CONFIG.capital,
+      };
+
+      const autoActivate = body.autoActivate !== false; // Default true
+      const autoExecute = body.autoExecute === true; // Default false
+
+      console.log(`[AutoEvolve] Starting auto-evolution with config:`, config, `autoActivate=${autoActivate}, autoExecute=${autoExecute}`);
+
+      // Step 1: Run the evolution loop
+      const result = await strategyEvolutionEngine.runEvolution(config);
+
+      let activatedSystemId: string | null = null;
+      let executedTradeId: string | null = null;
+
+      // Step 2: Auto-activate the best evolved strategy
+      if (autoActivate && result.bestStrategy) {
+        const bestStrat = result.bestStrategy;
+
+        // Find or create the trading system for the best strategy
+        const evolvedSystem = await db.tradingSystem.findUnique({
+          where: { id: bestStrat.systemId },
+        });
+
+        if (evolvedSystem) {
+          // Activate the system in paper trading mode
+          await db.tradingSystem.update({
+            where: { id: evolvedSystem.id },
+            data: { isActive: true, isPaperTrading: true },
+          });
+
+          activatedSystemId = evolvedSystem.id;
+          console.log(`[AutoEvolve] Auto-activated best strategy: ${evolvedSystem.name} (${evolvedSystem.id})`);
+
+          // Step 3: Auto-execute entry if requested
+          if (autoExecute && activatedSystemId) {
+            // Find a token from the backtest operations
+            const backtestOp = await db.backtestOperation.findFirst({
+              where: { backtestId: bestStrat.backtestId },
+              orderBy: { pnlUsd: 'desc' },
+            });
+
+            if (backtestOp) {
+              const positionSize = config.capital * 0.1; // 10% of capital per trade
+              try {
+                const entryResult = await strategyEvolutionEngine.executeEntry({
+                  systemId: activatedSystemId,
+                  tokenAddress: backtestOp.tokenAddress,
+                  tokenSymbol: backtestOp.tokenSymbol || '',
+                  direction: 'LONG',
+                  entryPrice: backtestOp.entryPrice || 0.001,
+                  positionSizeUsd: positionSize,
+                  chain: backtestOp.chain || 'ETH',
+                });
+                executedTradeId = entryResult.tradeId;
+                console.log(`[AutoEvolve] Auto-executed entry: tradeId=${entryResult.tradeId}`);
+              } catch (execError) {
+                console.error('[AutoEvolve] Auto-execute failed:', execError);
+              }
+            }
+          }
+        }
+      }
+
+      return NextResponse.json({
+        data: {
+          ...result,
+          activatedSystemId,
+          executedTradeId,
+          autoActivated: activatedSystemId !== null,
+          autoExecuted: executedTradeId !== null,
+          message: `Auto-evolution complete: ${result.improved} improved, ${result.degraded} degraded out of ${result.totalMutations} mutations` +
+            (activatedSystemId ? ` | Best strategy auto-activated (${activatedSystemId.slice(0, 8)}...)` : '') +
+            (executedTradeId ? ` | Entry auto-executed (trade ${executedTradeId.slice(0, 8)}...)` : ''),
         },
       });
     }
@@ -92,7 +177,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { data: null, error: `Unknown action: ${action}. Valid actions: evolve, execute_entry, execute_exit, open_positions, trade_history` },
+      { data: null, error: `Unknown action: ${action}. Valid actions: evolve, auto_evolve, execute_entry, execute_exit, open_positions, trade_history` },
       { status: 400 },
     );
   } catch (error) {

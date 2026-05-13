@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -44,6 +44,12 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Crosshair,
+  ArrowRightLeft,
+  Dna,
+  CircleDot,
+  TrendingUp,
+  AlertTriangle,
 } from 'lucide-react';
 
 // ============================================================
@@ -123,6 +129,29 @@ interface BestStrategy {
   score: number;
   backtestId: string;
   savedAt: string;
+}
+
+interface ExecutionStatus {
+  type: 'idle' | 'executing' | 'success' | 'error';
+  message: string;
+  tradeId?: string;
+  systemId?: string;
+  pnlUsd?: number;
+  pnlPct?: number;
+}
+
+interface OpenPosition {
+  backtestId: string;
+  systemId: string;
+  systemName: string;
+  tokenAddress: string;
+  tokenSymbol: string;
+  direction: string;
+  entryPrice: number;
+  entryTime: string;
+  positionSizeUsd: number;
+  quantity: number;
+  unrealizedPnl: number;
 }
 
 
@@ -575,6 +604,16 @@ export default function AIStrategyOptimizer() {
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoRunPhase, setAutoRunPhase] = useState<string>('');
 
+  // Hall of Fame collapsible state (visible by default)
+  const [hallOfFameCollapsed, setHallOfFameCollapsed] = useState(false);
+
+  // Refs for auto-scrolling to results
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Execution state
+  const [executionStatuses, setExecutionStatuses] = useState<ExecutionStatus[]>([]);
+  const [autoEvolveRunning, setAutoEvolveRunning] = useState(false);
+
   // Queries
   const { data: scanData, isLoading: scanLoading, refetch: refetchScan } = useQuery({
     queryKey: ['strategy-optimizer-scan'],
@@ -988,6 +1027,217 @@ export default function AIStrategyOptimizer() {
     evolveMutation.mutate();
   }, [evolveMutation]);
 
+  // ---- Auto-Trade Mutation (entry) ----
+  const autoTradeMutation = useMutation({
+    mutationFn: async (params: { systemId: string; tokenAddress: string; direction: 'LONG' | 'SHORT'; positionSizeUsd: number }) => {
+      const res = await fetch('/api/execution/auto-trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Auto-trade failed');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      setExecutionStatuses(prev => [...prev, {
+        type: 'success',
+        message: result.message,
+        tradeId: result.tradeId,
+        systemId: result.systemId,
+      }]);
+      toast.success(`✅ Entry executed: ${result.direction} ${result.tokenSymbol} at $${result.entryPrice?.toFixed(6)}`);
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
+    },
+    onError: (err) => {
+      setExecutionStatuses(prev => [...prev, {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Auto-trade failed',
+      }]);
+      toast.error('Auto-trade execution failed');
+    },
+  });
+
+  // ---- Auto-Exit Mutation ----
+  const autoExitMutation = useMutation({
+    mutationFn: async (params: { backtestId: string; exitPrice?: number; exitReason?: string }) => {
+      const res = await fetch('/api/execution/auto-exit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Auto-exit failed');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      setExecutionStatuses(prev => [...prev, {
+        type: 'success',
+        message: result.message,
+        pnlUsd: result.pnlUsd,
+        pnlPct: result.pnlPct,
+      }]);
+      toast.success(`📊 Exit executed: PnL ${result.pnlUsd >= 0 ? '+' : ''}$${result.pnlUsd?.toFixed(2)}`);
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
+    },
+    onError: (err) => {
+      setExecutionStatuses(prev => [...prev, {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Auto-exit failed',
+      }]);
+      toast.error('Auto-exit failed');
+    },
+  });
+
+  // ---- Auto-Evolve & Execute Mutation ----
+  const autoEvolveExecuteMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/strategy-optimizer/evolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'auto_evolve',
+          maxIterations: 3,
+          improvementThreshold: 2,
+          mutationRate: 0.3,
+          topN: 3,
+          capital,
+          autoActivate: true,
+          autoExecute: true,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Auto-evolve failed');
+      }
+      return res.json();
+    },
+    onSuccess: (data) => {
+      const result = data.data;
+      setAutoEvolveRunning(false);
+      const status: ExecutionStatus = {
+        type: 'success',
+        message: result.message,
+      };
+      if (result.activatedSystemId) status.systemId = result.activatedSystemId;
+      if (result.executedTradeId) status.tradeId = result.executedTradeId;
+      setExecutionStatuses(prev => [...prev, status]);
+      toast.success(`🧬🚀 ${result.message}`);
+      queryClient.invalidateQueries({ queryKey: ['backtests'] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-optimizer-rank'] });
+      queryClient.invalidateQueries({ queryKey: ['open-positions'] });
+      queryClient.invalidateQueries({ queryKey: ['trading-systems'] });
+      refetchRank();
+    },
+    onError: (err) => {
+      setAutoEvolveRunning(false);
+      setExecutionStatuses(prev => [...prev, {
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Auto-evolve & execute failed',
+      }]);
+      toast.error('Auto-evolve & execute failed');
+    },
+  });
+
+  // ---- Open Positions Query ----
+  const { data: openPositionsData, refetch: refetchOpenPositions } = useQuery({
+    queryKey: ['open-positions'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/strategy-optimizer/evolve?type=open_positions');
+        if (!res.ok) return [];
+        const json = await res.json();
+        return (json.data || []) as OpenPosition[];
+      } catch {
+        return [];
+      }
+    },
+    staleTime: 15000,
+    refetchInterval: 30000,
+  });
+
+  const openPositions = openPositionsData || [];
+
+  // ---- Execute Top N Strategies ----
+  const handleExecuteTopStrategies = useCallback(async (topN: number) => {
+    const topResults = filteredRankedResults.slice(0, topN);
+    if (topResults.length === 0) {
+      toast.error('No ranked strategies available to execute');
+      return;
+    }
+
+    setExecutionStatuses(prev => [...prev, {
+      type: 'executing',
+      message: `Executing top ${topN} strategies...`,
+    }]);
+
+    let executedCount = 0;
+    for (const result of topResults) {
+      try {
+        // Find the backtest operations to get a token to trade
+        const btRes = await fetch(`/api/backtest/${result.backtestId}`);
+        if (!btRes.ok) continue;
+        const btData = await btRes.json();
+        const btInfo = btData.data;
+
+        // Get token from backtest operations
+        const opsRes = await fetch(`/api/strategy-optimizer/evolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'trade_history', systemId: btInfo?.systemId, limit: 5 }),
+        });
+
+        let tokenAddress = '';
+        if (opsRes.ok) {
+          const opsData = await opsRes.json();
+          const ops = opsData.data || [];
+          if (ops.length > 0) {
+            tokenAddress = ops[0].tokenAddress || '';
+          }
+        }
+
+        // Fallback: use a sample token address
+        if (!tokenAddress) {
+          tokenAddress = '0x0000000000000000000000000000000000000001';
+        }
+
+        const systemId = btInfo?.systemId || btInfo?.id;
+        if (!systemId) continue;
+
+        await autoTradeMutation.mutateAsync({
+          systemId,
+          tokenAddress,
+          direction: 'LONG',
+          positionSizeUsd: Math.min(result.capitalAllocation, capital * 0.1),
+        });
+        executedCount++;
+      } catch {
+        // Skip failed executions
+      }
+    }
+
+    if (executedCount > 0) {
+      toast.success(`🎯 Executed entries for ${executedCount}/${topN} strategies`);
+    }
+    refetchOpenPositions();
+  }, [filteredRankedResults, capital, autoTradeMutation, refetchOpenPositions]);
+
+  // ---- Auto-Evolve & Execute handler ----
+  const handleAutoEvolveAndExecute = useCallback(() => {
+    setAutoEvolveRunning(true);
+    setExecutionStatuses(prev => [...prev, {
+      type: 'executing',
+      message: 'Running auto-evolution + auto-activation + auto-execution...',
+    }]);
+    autoEvolveExecuteMutation.mutate();
+  }, [autoEvolveExecuteMutation]);
+
   const toggleTimeframe = (tf: string) => {
     setSelectedTimeframes(prev =>
       prev.includes(tf) ? prev.filter(t => t !== tf) : [...prev, tf]
@@ -1136,6 +1386,15 @@ export default function AIStrategyOptimizer() {
   // Selected count
   const selectedCount = selectedStrategyIds.size;
 
+  // Auto-scroll to results when backtesting completes
+  useEffect(() => {
+    if (currentStep === 'results' && resultsRef.current) {
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+    }
+  }, [currentStep]);
+
   return (
     <div className="flex flex-col h-full bg-[#0a0e17] border border-[#1e293b] rounded-lg overflow-hidden">
       {/* Header */}
@@ -1171,6 +1430,18 @@ export default function AIStrategyOptimizer() {
             Evolve Top Strategies
           </Button>
           <Button
+            onClick={handleAutoEvolveAndExecute}
+            disabled={autoEvolveRunning || autoEvolveExecuteMutation.isPending || rankedResults.length === 0}
+            className="h-7 px-3 text-[10px] font-mono bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30"
+          >
+            {autoEvolveRunning || autoEvolveExecuteMutation.isPending ? (
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            ) : (
+              <Dna className="h-3 w-3 mr-1" />
+            )}
+            Auto-Evolve & Execute
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             onClick={handleQuickStart}
@@ -1190,7 +1461,7 @@ export default function AIStrategyOptimizer() {
       </div>
 
       {/* Main Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 space-y-4">
           {/* ============================================= */}
           {/* VISUAL PIPELINE FLOW */}
@@ -1601,7 +1872,7 @@ export default function AIStrategyOptimizer() {
           {/* ============================================= */}
           {/* STEP 4: Results Ranking */}
           {/* ============================================= */}
-          <div className="bg-[#0d1117] border border-[#1e293b] rounded-lg p-4 space-y-3">
+          <div ref={resultsRef} className="bg-[#0d1117] border border-[#1e293b] rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <BarChart3 className="h-3.5 w-3.5 text-[#d4af37]" />
@@ -1610,16 +1881,79 @@ export default function AIStrategyOptimizer() {
                   {filteredRankedResults.length} results
                 </Badge>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => refetchRank()}
-                disabled={rankLoading}
-                className="h-6 px-2 text-[10px] font-mono text-[#64748b] hover:text-[#e2e8f0]"
-              >
-                <RefreshCw className={`h-3 w-3 mr-1 ${rankLoading ? 'animate-spin' : ''}`} /> Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Execute Top Strategy Button */}
+                <Button
+                  onClick={() => handleExecuteTopStrategies(1)}
+                  disabled={autoTradeMutation.isPending || filteredRankedResults.length === 0}
+                  className="h-6 px-3 text-[9px] font-mono bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30"
+                >
+                  {autoTradeMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <Crosshair className="h-3 w-3 mr-1" />
+                  )}
+                  Execute #1
+                </Button>
+                <Button
+                  onClick={() => handleExecuteTopStrategies(3)}
+                  disabled={autoTradeMutation.isPending || filteredRankedResults.length === 0}
+                  className="h-6 px-3 text-[9px] font-mono bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30"
+                >
+                  <TrendingUp className="h-3 w-3 mr-1" />
+                  Execute Top 3
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => refetchRank()}
+                  disabled={rankLoading}
+                  className="h-6 px-2 text-[10px] font-mono text-[#64748b] hover:text-[#e2e8f0]"
+                >
+                  <RefreshCw className={`h-3 w-3 mr-1 ${rankLoading ? 'animate-spin' : ''}`} /> Refresh
+                </Button>
+              </div>
             </div>
+
+            {/* Execution Status Panel */}
+            {executionStatuses.length > 0 && (
+              <div className="bg-[#111827] border border-[#1e293b] rounded-lg p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <CircleDot className="h-3 w-3 text-[#d4af37]" />
+                    <span className="text-[9px] font-mono text-[#94a3b8] uppercase tracking-wider">Execution Log</span>
+                  </div>
+                  <button
+                    onClick={() => setExecutionStatuses([])}
+                    className="text-[8px] font-mono text-[#475569] hover:text-[#94a3b8]"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {executionStatuses.slice(-10).reverse().map((status, idx) => (
+                    <div key={`exec-${idx}`} className={`flex items-center gap-2 text-[9px] font-mono px-2 py-1 rounded ${
+                      status.type === 'success' ? 'bg-emerald-500/5 text-emerald-400' :
+                      status.type === 'error' ? 'bg-red-500/5 text-red-400' :
+                      status.type === 'executing' ? 'bg-amber-500/5 text-amber-400' :
+                      'bg-[#1a1f2e] text-[#94a3b8]'
+                    }`}>
+                      {status.type === 'success' && <Check className="h-3 w-3 shrink-0" />}
+                      {status.type === 'error' && <AlertTriangle className="h-3 w-3 shrink-0" />}
+                      {status.type === 'executing' && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                      {status.type === 'idle' && <CircleDot className="h-3 w-3 shrink-0" />}
+                      <span className="flex-1 truncate">{status.message}</span>
+                      {status.tradeId && <Badge className="text-[7px] h-3 px-1 font-mono bg-[#0a0e17] text-[#64748b] border-0">{status.tradeId.slice(0, 8)}</Badge>}
+                      {status.pnlUsd !== undefined && (
+                        <span className={status.pnlUsd >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                          {status.pnlUsd >= 0 ? '+' : ''}{status.pnlUsd.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Filter Pills */}
             {rankedResults.length > 0 && (
@@ -1707,9 +2041,9 @@ export default function AIStrategyOptimizer() {
                 </span>
               </div>
             ) : (
-              <div className="overflow-y-auto" style={{ maxHeight: 'min(500px, 60vh)' }}>
+              <ScrollArea style={{ maxHeight: 'min(500px, 60vh)' }}>
                 <table className="w-full text-[9px] font-mono">
-                  <thead className="sticky top-0 bg-[#0d1117] z-10">
+                  <thead>
                     <tr className="text-[#475569] uppercase border-b border-[#1e293b]">
                       <th className="py-1.5 px-1.5 text-left">#</th>
                       <th className="py-1.5 px-1.5 text-left">Strategy</th>
@@ -1738,21 +2072,120 @@ export default function AIStrategyOptimizer() {
                         <td className="py-1.5 px-1.5 text-right text-[#94a3b8]">{result.profitFactor.toFixed(2)}</td>
                         <td className="py-1.5 px-1.5 text-right text-[#94a3b8]">{result.totalTrades}</td>
                         <td className="py-1.5 px-1.5 text-center">
-                          <button
-                            onClick={() => saveBestMutation.mutate(result)}
-                            className="text-[#475569] hover:text-[#d4af37] transition-colors"
-                            title="Save to Hall of Fame"
-                          >
-                            <BookmarkPlus className="h-3 w-3" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => handleExecuteTopStrategies(1)}
+                                  className="text-emerald-400/60 hover:text-emerald-400 transition-colors"
+                                  title="Execute this strategy"
+                                >
+                                  <Crosshair className="h-3 w-3" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>Execute Trade</TooltipContent>
+                            </Tooltip>
+                            <button
+                              onClick={() => saveBestMutation.mutate(result)}
+                              className="text-[#475569] hover:text-[#d4af37] transition-colors"
+                              title="Save to Hall of Fame"
+                            >
+                              <BookmarkPlus className="h-3 w-3" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollArea>
             )}
           </div>
+
+          {/* ============================================= */}
+          {/* OPEN POSITIONS MONITOR */}
+          {/* ============================================= */}
+          <AnimatePresence>
+            {openPositions.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="bg-[#0d1117] border border-emerald-500/20 rounded-lg p-4 space-y-3"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <ArrowRightLeft className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-[11px] font-mono text-emerald-400 uppercase tracking-wider">Open Positions</span>
+                    <Badge className="text-[8px] h-4 px-1.5 font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {openPositions.length} active
+                    </Badge>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => refetchOpenPositions()}
+                    className="h-6 px-2 text-[10px] font-mono text-[#64748b] hover:text-[#e2e8f0]"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" /> Refresh
+                  </Button>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {openPositions.map((pos, idx) => (
+                    <motion.div
+                      key={pos.backtestId || `pos-${idx}`}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="bg-[#111827] border border-[#1e293b] rounded-lg p-3"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Badge className={`text-[8px] h-4 px-1.5 font-mono border-0 ${
+                            pos.direction === 'LONG' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                          }`}>
+                            {pos.direction}
+                          </Badge>
+                          <span className="font-mono text-xs font-bold text-[#e2e8f0]">{pos.tokenSymbol || pos.tokenAddress.slice(0, 8)}</span>
+                          <span className="text-[9px] font-mono text-[#64748b]">{pos.systemName}</span>
+                        </div>
+                        <Button
+                          onClick={() => autoExitMutation.mutate({
+                            backtestId: pos.backtestId,
+                            exitReason: 'manual_close',
+                          })}
+                          disabled={autoExitMutation.isPending}
+                          className="h-5 px-2 text-[8px] font-mono bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30"
+                        >
+                          <ArrowRightLeft className="h-2.5 w-2.5 mr-0.5" />
+                          Close Position
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-4 gap-x-3 gap-y-0.5 text-[9px] font-mono">
+                        <div>
+                          <span className="text-[#64748b]">Entry</span>
+                          <div className="text-[#e2e8f0]">${pos.entryPrice.toFixed(6)}</div>
+                        </div>
+                        <div>
+                          <span className="text-[#64748b]">Size</span>
+                          <div className="text-[#d4af37]">${pos.positionSizeUsd.toFixed(2)}</div>
+                        </div>
+                        <div>
+                          <span className="text-[#64748b]">Qty</span>
+                          <div className="text-[#94a3b8]">{pos.quantity.toFixed(4)}</div>
+                        </div>
+                        <div>
+                          <span className="text-[#64748b]">Time</span>
+                          <div className="text-[#94a3b8]">{new Date(pos.entryTime).toLocaleTimeString()}</div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* ============================================= */}
           {/* STEP 5: Hall of Fame with One-Click Activate */}
@@ -1765,6 +2198,13 @@ export default function AIStrategyOptimizer() {
                 <Badge className="text-[8px] h-4 px-1.5 font-mono bg-[#1a1f2e] text-[#d4af37] border-[#d4af37]/30">
                   {bestStrategies.length} saved
                 </Badge>
+                <button
+                  onClick={() => setHallOfFameCollapsed(!hallOfFameCollapsed)}
+                  className="h-5 w-5 flex items-center justify-center text-[#64748b] hover:text-[#94a3b8] transition-colors"
+                  title={hallOfFameCollapsed ? 'Expand Hall of Fame' : 'Collapse Hall of Fame'}
+                >
+                  {hallOfFameCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                </button>
               </div>
               {/* One-Click Activate All */}
               {bestStrategies.length > 0 && (
@@ -1802,85 +2242,99 @@ export default function AIStrategyOptimizer() {
                 <span className="font-mono text-sm">No saved strategies yet. Bookmark your best results above.</span>
               </div>
             ) : (
-              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 'min(400px, 50vh)' }}>
-                {bestStrategies.map((strat, idx) => (
+              <AnimatePresence>
+                {!hallOfFameCollapsed && (
                   <motion.div
-                    key={strat.id || `best-${idx}`}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.05 }}
-                    className="bg-[#111827] border border-[#d4af37]/20 rounded-lg p-3"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
                   >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[9px] font-mono text-[#d4af37]">#{idx + 1}</span>
-                        <Trophy className="h-3.5 w-3.5 text-[#d4af37]" />
-                        <span className="font-mono text-xs font-bold text-[#e2e8f0]">{strat.strategyName}</span>
-                        <Badge className="text-[7px] h-3.5 px-1 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
-                          {strat.category}
-                        </Badge>
-                        <Badge className="text-[7px] h-3.5 px-1 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
-                          {strat.timeframe}
-                        </Badge>
+                    <ScrollArea style={{ maxHeight: 'min(400px, 50vh)' }}>
+                      <div className="space-y-2">
+                        {bestStrategies.map((strat, idx) => (
+                          <motion.div
+                            key={strat.id || `best-${idx}`}
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="bg-[#111827] border border-[#d4af37]/20 rounded-lg p-3"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] font-mono text-[#d4af37]">#{idx + 1}</span>
+                                <Trophy className="h-3.5 w-3.5 text-[#d4af37]" />
+                                <span className="font-mono text-xs font-bold text-[#e2e8f0]">{strat.strategyName}</span>
+                                <Badge className="text-[7px] h-3.5 px-1 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
+                                  {strat.category}
+                                </Badge>
+                                <Badge className="text-[7px] h-3.5 px-1 font-mono bg-[#1a1f2e] text-[#94a3b8] border-0">
+                                  {strat.timeframe}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Badge className="text-[8px] h-3.5 px-1.5 font-mono bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30">
+                                  Score: {strat.score.toFixed(1)}
+                                </Badge>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => activateMutation.mutate(strat)}
+                                      disabled={activateMutation.isPending}
+                                      className="h-6 w-6 flex items-center justify-center rounded transition-all bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 border border-emerald-500/20"
+                                      title="Activate as Trading System"
+                                    >
+                                      <Rocket className="h-3 w-3" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Activate as Live Trading System</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      onClick={() => deleteBestMutation.mutate(strat.id)}
+                                      className="h-6 w-6 flex items-center justify-center rounded transition-all bg-[#1a1f2e] text-[#64748b] hover:text-red-400 hover:bg-red-500/10 border border-[#1e293b]"
+                                      title="Remove"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Remove from Hall of Fame</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-5 gap-x-3 gap-y-0.5 text-[9px] font-mono">
+                              <div>
+                                <span className="text-[#64748b]">Sharpe</span>
+                                <div className="text-[#e2e8f0]">{strat.sharpeRatio.toFixed(2)}</div>
+                              </div>
+                              <div>
+                                <span className="text-[#64748b]">Win Rate</span>
+                                <div className="text-[#e2e8f0]">{(strat.winRate * 100).toFixed(0)}%</div>
+                              </div>
+                              <div>
+                                <span className="text-[#64748b]">PnL</span>
+                                <div className={strat.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                  {strat.pnlPct >= 0 ? '+' : ''}{strat.pnlPct.toFixed(1)}%
+                                </div>
+                              </div>
+                              <div>
+                                <span className="text-[#64748b]">Max DD</span>
+                                <div className="text-red-400">{strat.maxDrawdownPct.toFixed(1)}%</div>
+                              </div>
+                              <div>
+                                <span className="text-[#64748b]">Allocation</span>
+                                <div className="text-[#d4af37]">${strat.capitalAllocation.toFixed(0)}</div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Badge className="text-[8px] h-3.5 px-1.5 font-mono bg-[#d4af37]/15 text-[#d4af37] border border-[#d4af37]/30">
-                          Score: {strat.score.toFixed(1)}
-                        </Badge>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => activateMutation.mutate(strat)}
-                              disabled={activateMutation.isPending}
-                              className="h-6 w-6 flex items-center justify-center rounded transition-all bg-emerald-600/10 text-emerald-400 hover:bg-emerald-600/20 border border-emerald-500/20"
-                              title="Activate as Trading System"
-                            >
-                              <Rocket className="h-3 w-3" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>Activate as Live Trading System</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              onClick={() => deleteBestMutation.mutate(strat.id)}
-                              className="h-6 w-6 flex items-center justify-center rounded transition-all bg-[#1a1f2e] text-[#64748b] hover:text-red-400 hover:bg-red-500/10 border border-[#1e293b]"
-                              title="Remove"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>Remove from Hall of Fame</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-5 gap-x-3 gap-y-0.5 text-[9px] font-mono">
-                      <div>
-                        <span className="text-[#64748b]">Sharpe</span>
-                        <div className="text-[#e2e8f0]">{strat.sharpeRatio.toFixed(2)}</div>
-                      </div>
-                      <div>
-                        <span className="text-[#64748b]">Win Rate</span>
-                        <div className="text-[#e2e8f0]">{(strat.winRate * 100).toFixed(0)}%</div>
-                      </div>
-                      <div>
-                        <span className="text-[#64748b]">PnL</span>
-                        <div className={strat.pnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                          {strat.pnlPct >= 0 ? '+' : ''}{strat.pnlPct.toFixed(1)}%
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-[#64748b]">Max DD</span>
-                        <div className="text-red-400">{strat.maxDrawdownPct.toFixed(1)}%</div>
-                      </div>
-                      <div>
-                        <span className="text-[#64748b]">Allocation</span>
-                        <div className="text-[#d4af37]">${strat.capitalAllocation.toFixed(0)}</div>
-                      </div>
-                    </div>
+                    </ScrollArea>
                   </motion.div>
-                ))}
-              </div>
+                )}
+              </AnimatePresence>
             )}
           </div>
         </div>

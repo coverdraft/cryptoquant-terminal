@@ -1087,3 +1087,39 @@ model AIBestStrategy {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+// ============================================================
+// STRATEGY STATE HISTORY - Real-time & Historical State Tracking
+// ============================================================
+
+model StrategyStateHistory {
+  id              String   @id @default(cuid())
+  systemId        String
+  
+  // State snapshot
+  status          String   // IDLE, BACKTESTING, PAPER_TRADING, LIVE, PAUSED, ERROR, EVOLVED
+  previousStatus  String?  // Previous status for tracking transitions
+  
+  // Metrics snapshot at this point in time
+  totalPnlUsd     Float    @default(0)
+  totalPnlPct     Float    @default(0)
+  sharpeRatio     Float    @default(0)
+  winRate         Float    @default(0)
+  totalTrades     Int      @default(0)
+  openPositions   Int      @default(0)
+  
+  // Context
+  triggerReason   String   // MANUAL, AUTO_BACKTEST, AUTO_EVOLVE, RISK_LIMIT, SCHEDULER
+  metadata        String   @default("{}") // JSON: additional context
+  
+  // Evolution tracking
+  generation      Int      @default(1)
+  parentId        String?
+  improvementPct  Float    @default(0)
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([systemId, createdAt])
+  @@index([status, createdAt])
+  @@map("strategy_state_history")
+}
